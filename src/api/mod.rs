@@ -40,6 +40,8 @@ mod song_url_v1_302;
 mod song_wiki_summary;
 
 // ---- 搜索相关 ----
+mod chart_detail;
+mod chart_song_detail;
 mod cloudsearch;
 mod search;
 mod search_default;
@@ -313,6 +315,7 @@ mod resource_like;
 
 // ---- 国家编码 ----
 mod countries_code_list;
+mod lbs_city_code;
 
 // ---- 最近播放 ----
 mod recent_listen_list;
