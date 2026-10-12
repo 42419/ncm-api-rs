@@ -13,6 +13,8 @@ mod lyric;
 mod lyric_new;
 mod scrobble;
 mod song_chorus;
+mod song_copyright_rcmd;
+mod song_creators;
 mod song_detail;
 mod song_downlist;
 mod song_download_url;
@@ -128,6 +130,7 @@ mod comment_mv;
 mod comment_new;
 mod comment_reply;
 mod comment_playlist;
+mod comment_report;
 mod comment_video;
 
 // ---- 推荐相关 ----
@@ -363,6 +366,7 @@ mod broadcast_channel_collect_list;
 mod broadcast_channel_currentinfo;
 mod broadcast_channel_list;
 mod broadcast_sub;
+mod radio_sport_get;
 
 // ---- 达人/创作者 ----
 mod creator_authinfo_get;
@@ -407,6 +411,12 @@ mod voicelist_list;
 mod voicelist_list_search;
 mod voicelist_search;
 mod voicelist_trans;
+mod sati_resource_list;
+mod sati_resource_list_more;
+mod sati_resource_sub;
+mod sati_resource_sub_list;
+mod sati_tag_list;
+mod sati_timescene_resources_get;
 
 // ---- 私人 DJ ----
 mod aidj_content_rcmd;
