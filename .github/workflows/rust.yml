@@ -16,7 +16,15 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    - name: Check formatting
+      run: cargo fmt --all -- --check
     - name: Build
       run: cargo build --verbose
     - name: Run tests
       run: cargo test --verbose
+    # 默认 feature 不含 server（Cargo.toml 里 default = []），上面的 build/test
+    # 覆盖不到 src/server/*，所以再跑一遍全 feature，避免 server 代码改了却无人验证。
+    - name: Build (all features)
+      run: cargo build --verbose --all-features
+    - name: Run tests (all features)
+      run: cargo test --verbose --all-features
