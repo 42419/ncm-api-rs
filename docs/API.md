@@ -1787,10 +1787,16 @@ let result = client.playlist_tags_update(&query).await?;
 
 **方法名 :** `playlist_cover_update`
 
+说明 : 与 `avatar_upload` 一样需要调用方提供图片二进制数据（对应上游 multipart 的
+`imgFile` 字段）；`img_name` / `img_mimetype` 通过 query 传入，缺省为
+`cover.jpg` / `image/jpeg`。不传文件（`None`）时返回
+`400 {"code":400,"msg":"imgFile is required"}`，与上游一致。
+
 **调用例子 :**
 ```rust
-let query = Query::new().param("id", "3143833470").param("imgSize", "200");
-let result = client.playlist_cover_update(&query).await?;
+let query = Query::new().param("id", "3143833470");
+let img_data: Vec<u8> = std::fs::read("cover.jpg")?;
+let result = client.playlist_cover_update(&query, Some(&img_data)).await?;
 ```
 
 ### 调整歌单顺序

@@ -165,6 +165,23 @@ async fn extract_merged_query(
 fn build_success_response(api_resp: ApiResponse) -> Response {
     let status = axum::http::StatusCode::from_u16(api_resp.status as u16)
         .unwrap_or(axum::http::StatusCode::OK);
+
+    // 对应上游 server.js 的 `if (moduleResponse.redirectUrl) res.redirect(...)`。
+    // `song_url_v1_302` 会把目标地址放在 `body.redirectUrl` 并返回 302，
+    // 这里据此下发 `Location` 头（不发送 JSON body），与上游行为一致。
+    if let Some(redirect_url) = api_resp.body.get("redirectUrl").and_then(|v| v.as_str()) {
+        let mut response = status.into_response();
+        if let Ok(val) = header::HeaderValue::from_str(redirect_url) {
+            response.headers_mut().insert(header::LOCATION, val);
+        }
+        for cookie_str in &api_resp.cookie {
+            if let Ok(val) = header::HeaderValue::from_str(cookie_str) {
+                response.headers_mut().append(header::SET_COOKIE, val);
+            }
+        }
+        return response;
+    }
+
     let mut response = (status, Json(api_resp.body)).into_response();
 
     // 设置 API 返回的 Cookie
@@ -284,8 +301,13 @@ macro_rules! api_routes {
 
 /// 注册所有 API 路由
 ///
-/// 标准路由由 build.rs 自动从 src/api/mod.rs 扫描生成
-/// 上传路由（avatar_upload, voice_upload）需要 multipart 处理，单独注册
+/// 标准路由由 build.rs 自动从 src/api/mod.rs 扫描生成。
+/// 以下几类签名不适配通用宏（`api_routes!` 里直接把
+/// `client.$method(q)` 当成 Future），需要单独注册：
+/// - `/avatar/upload`、`/voice/upload`、`/cloud`、`/playlist/cover/update`：
+///   需要 multipart 处理
+/// - `/eapi/decrypt`：同步方法，返回值不是 Future
+/// - `/inner/version`：不接受 `query` 参数
 fn register_routes(router: Router<AppState>) -> Router<AppState> {
     // 自动生成的标准路由（build.rs → api_routes_generated.rs）
     let router = { include!(concat!(env!("OUT_DIR"), "/api_routes_generated.rs")) };
@@ -293,9 +315,57 @@ fn register_routes(router: Router<AppState>) -> Router<AppState> {
     // 文件上传路由（特殊签名，需要 multipart 处理）
     let router = router
         .route("/avatar/upload", post(upload::handle_avatar_upload))
-        .route("/voice/upload", post(upload::handle_voice_upload));
+        .route("/voice/upload", post(upload::handle_voice_upload))
+        .route("/cloud", post(upload::handle_cloud_upload))
+        .route(
+            "/playlist/cover/update",
+            post(upload::handle_playlist_cover_update),
+        );
+
+    // 签名与通用宏不符的路由，手动注册（上游同样暴露这两个路径）
+    let router = router
+        .route(
+            "/eapi/decrypt",
+            get(eapi_decrypt_handler).post(eapi_decrypt_handler),
+        )
+        .route(
+            "/inner/version",
+            get(inner_version_handler).post(inner_version_handler),
+        );
 
     router
+}
+
+/// `/eapi/decrypt` 处理器
+///
+/// `ApiClient::eapi_decrypt` 是同步方法（只做本地解密、不发网络请求），
+/// 所以这里用 `async move` 包一层再 `Box::pin`。
+async fn eapi_decrypt_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    uri: axum::http::Uri,
+    body: axum::body::Bytes,
+) -> Response {
+    handle_api_request(&state, headers, &uri, body, |client, q| {
+        Box::pin(async move { client.eapi_decrypt(q) })
+    })
+    .await
+}
+
+/// `/inner/version` 处理器
+///
+/// `ApiClient::inner_version` 不接受 `query`（版本号取自编译期常量），
+/// 请求参数照常解析后丢弃。
+async fn inner_version_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    uri: axum::http::Uri,
+    body: axum::body::Bytes,
+) -> Response {
+    handle_api_request(&state, headers, &uri, body, |client, _q| {
+        Box::pin(async move { client.inner_version().await })
+    })
+    .await
 }
 
 // ============================================================

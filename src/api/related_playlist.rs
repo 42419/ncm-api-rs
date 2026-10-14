@@ -30,15 +30,13 @@ impl ApiClient {
             let user_href = caps.get(4).map(|m| m.as_str()).unwrap_or("");
             let nickname = caps.get(5).map(|m| m.as_str()).unwrap_or("");
 
-            let user_id = user_href
-                .strip_prefix("/user/home?id=")
-                .unwrap_or(user_href);
-            let playlist_id = playlist_href
-                .strip_prefix("/playlist?id=")
-                .unwrap_or(playlist_href);
-            let cover = cover_img_url
-                .strip_suffix("?param=50y50")
-                .unwrap_or(cover_img_url);
+            // 上游是 `result[4].slice('/user/home?id='.length)` /
+            // `result[2].slice('/playlist?id='.length)` /
+            // `result[1].slice(0, -'?param=50y50'.length)`——**无条件**按长度截断，
+            // 不是「匹配到前后缀才截」
+            let user_id = js_slice_from(user_href, "/user/home?id=".len());
+            let playlist_id = js_slice_from(playlist_href, "/playlist?id=".len());
+            let cover = js_slice_to(cover_img_url, "?param=50y50".len());
 
             playlists.push(json!({
                 "creator": {
@@ -56,5 +54,23 @@ impl ApiClient {
             body: json!({ "code": 200, "playlists": playlists }),
             cookie: vec![],
         })
+    }
+}
+
+/// 复刻 JS `str.slice(n)`：从第 n 个字符起截取，长度不足时返回空串。
+fn js_slice_from(s: &str, start: usize) -> &str {
+    s.char_indices()
+        .nth(start)
+        .map(|(idx, _)| &s[idx..])
+        .unwrap_or("")
+}
+
+/// 复刻 JS `str.slice(0, -n)`：去掉末尾 n 个字符，长度不足时返回空串。
+fn js_slice_to(s: &str, back: usize) -> &str {
+    let keep = s.chars().count().saturating_sub(back);
+    match s.char_indices().nth(keep) {
+        Some((idx, _)) => &s[..idx],
+        // `keep` 等于字符数（空串，或 `back == 0` 时的 `slice(0, 0)`）
+        None => "",
     }
 }

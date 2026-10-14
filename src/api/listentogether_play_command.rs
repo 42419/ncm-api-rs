@@ -17,10 +17,21 @@ impl ApiClient {
             "targetSongId": query.get_or("targetSongId", ""),
             "clientSeq": query.get_or("clientSeq", "")
         });
-        let data = json!({
+        let mut data = json!({
             "roomId": query.get_or("roomId", ""),
             "commandInfo": command_info.to_string()
         });
+        query.drop_absent_params(
+            &mut data,
+            &[
+                ("clientSeq", "clientSeq"),
+                ("commandType", "commandType"),
+                ("formerSongId", "formerSongId"),
+                ("playStatus", "playStatus"),
+                ("roomId", "roomId"),
+                ("targetSongId", "targetSongId"),
+            ],
+        );
         self.request(
             "/api/listen/together/play/command/report",
             data,

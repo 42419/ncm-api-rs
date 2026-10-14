@@ -9,9 +9,10 @@ impl ApiClient {
     /// 歌曲是否喜爱
     /// 对应 /song/like/check
     pub async fn song_like_check(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "trackIds": query.get_or("ids", ""),
         });
+        query.drop_absent_params(&mut data, &[("trackIds", "ids")]);
         self.request(
             "/api/song/like/check",
             data,

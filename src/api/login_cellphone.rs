@@ -17,6 +17,8 @@ impl ApiClient {
             "countrycode": query.get_or("countrycode", "86"),
             "remember": "true"
         });
+        // 上游 `phone: query.phone`：缺省时该键被 JSON.stringify 丢弃
+        query.drop_absent_params(&mut data, &[("phone", "phone")]);
 
         if let Some(captcha) = query.get("captcha") {
             data["captcha"] = Value::String(captcha.to_string());

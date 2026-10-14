@@ -9,12 +9,13 @@ impl ApiClient {
     /// 私信歌单
     /// 对应 /send/playlist
     pub async fn send_playlist(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "id": query.get_or("playlist", "0"),
             "type": "playlist",
             "msg": query.get_or("msg", ""),
             "userIds": format!("[{}]", query.get_or("user_ids", ""))
         });
+        query.drop_absent_params(&mut data, &[("msg", "msg")]);
         self.request(
             "/api/msg/private/send",
             data,

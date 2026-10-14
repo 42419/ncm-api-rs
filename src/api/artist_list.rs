@@ -18,7 +18,7 @@ impl ApiClient {
             let ch = initial_str.to_uppercase().chars().next().unwrap_or('A');
             json!(ch as i64)
         };
-        let data = json!({
+        let mut data = json!({
             "initial": initial,
             "offset": query.get_or("offset", "0").parse::<i64>().unwrap_or(0),
             "limit": query.get_or("limit", "30").parse::<i64>().unwrap_or(30),
@@ -26,6 +26,7 @@ impl ApiClient {
             "type": query.get_or("type", "1"),
             "area": query.get_or("area", "")
         });
+        query.drop_absent_params(&mut data, &[("area", "area")]);
         self.request(
             "/api/v1/artist/list",
             data,

@@ -9,9 +9,10 @@ impl ApiClient {
     /// 乐谱预览
     /// 对应 /sheet/preview
     pub async fn sheet_preview(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "id": query.get_or("id", "")
         });
+        query.drop_absent_params(&mut data, &[("id", "id")]);
         self.request(
             "/api/music/sheet/preview/info",
             data,

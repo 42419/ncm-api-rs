@@ -17,7 +17,10 @@ impl ApiClient {
         });
 
         if sale_type == "year" {
-            data["year"] = json!(query.get_or("year", ""));
+            // 上游 `year: query.year` 为裸取值，缺省时丢键
+            if let Some(year) = query.get("year") {
+                data["year"] = json!(year);
+            }
         }
 
         let url = format!("/api/feealbum/songsaleboard/{}/type", sale_type);

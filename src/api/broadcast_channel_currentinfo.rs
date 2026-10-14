@@ -9,9 +9,10 @@ impl ApiClient {
     /// 广播电台 - 电台信息
     /// 对应 /broadcast/channel/currentinfo
     pub async fn broadcast_channel_currentinfo(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "channelId": query.get_or("id", "")
         });
+        query.drop_absent_params(&mut data, &[("channelId", "id")]);
         self.request(
             "/api/voice/broadcast/channel/currentinfo",
             data,

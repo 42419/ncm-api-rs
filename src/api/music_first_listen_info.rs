@@ -9,9 +9,10 @@ impl ApiClient {
     /// 回忆坐标
     /// 对应 /music/first/listen/info
     pub async fn music_first_listen_info(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "songId": query.get_or("id", "")
         });
+        query.drop_absent_params(&mut data, &[("songId", "id")]);
         self.request(
             "/api/content/activity/music/first/listen/info",
             data,

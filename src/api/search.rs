@@ -12,12 +12,13 @@ impl ApiClient {
         let search_type = query.get_or("type", "1").parse::<i64>().unwrap_or(1);
 
         if search_type == 2000 {
-            let data = json!({
+            let mut data = json!({
                 "keyword": query.get_or("keywords", ""),
                 "scene": "normal",
                 "limit": query.get_or("limit", "30").parse::<i64>().unwrap_or(30),
                 "offset": query.get_or("offset", "0").parse::<i64>().unwrap_or(0)
             });
+            query.drop_absent_params(&mut data, &[("keyword", "keywords")]);
             self.request(
                 "/api/search/voice/get",
                 data,
@@ -25,12 +26,13 @@ impl ApiClient {
             )
             .await
         } else {
-            let data = json!({
+            let mut data = json!({
                 "s": query.get_or("keywords", ""),
                 "type": search_type,
                 "limit": query.get_or("limit", "30").parse::<i64>().unwrap_or(30),
                 "offset": query.get_or("offset", "0").parse::<i64>().unwrap_or(0)
             });
+            query.drop_absent_params(&mut data, &[("s", "keywords")]);
             self.request(
                 "/api/search/get",
                 data,

@@ -31,7 +31,6 @@ impl ApiClient {
             .unwrap_or_default();
 
         let data = json!({
-            "rid": id,
             "threadId": thread_id,
             "pageNo": page_no,
             "showInner": query.get_or("showInner", "true"),

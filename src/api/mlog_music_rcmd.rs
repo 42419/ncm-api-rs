@@ -9,14 +9,18 @@ impl ApiClient {
     /// 歌曲相关视频
     /// 对应 /mlog/music/rcmd
     pub async fn mlog_music_rcmd(&self, query: &Query) -> Result<ApiResponse> {
+        // 上游 `extInfo: JSON.stringify({ songId: query.songid })`：
+        // songid 缺省时丢键，整个对象为空
+        let mut ext_info = json!({});
+        if let Some(songid) = query.get("songid") {
+            ext_info["songId"] = json!(songid);
+        }
         let data = json!({
             "id": query.get_or("mvid", "0").parse::<i64>().unwrap_or(0),
             "type": 2,
             "rcmdType": 20,
             "limit": query.get_or("limit", "10").parse::<i64>().unwrap_or(10),
-            "extInfo": serde_json::to_string(&json!({
-                "songId": query.get_or("songid", "")
-            })).unwrap_or_default()
+            "extInfo": ext_info.to_string()
         });
         self.request(
             "/api/mlog/rcmd/feed/list",

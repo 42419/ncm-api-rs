@@ -9,9 +9,10 @@ impl ApiClient {
     /// 云随机播放
     /// 对应 /playmode/song/vector
     pub async fn playmode_song_vector(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "ids": query.get_or("ids", "")
         });
+        query.drop_absent_params(&mut data, &[("ids", "ids")]);
         self.request(
             "/api/playmode/song/vector/get",
             data,

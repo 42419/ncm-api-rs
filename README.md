@@ -25,7 +25,7 @@
 ## 特点
 
 - **纯 Rust 实现** - 无需 Node.js 运行时，独立编译部署
-- **完整加密支持** - 完整实现 weapi / eapi / linuxapi 三种加密方式
+- **完整加密支持** - 完整实现 weapi / eapi / xeapi / linuxapi 四种加密方式（另支持明文 api）
 - **极低内存占用** - ~5MB vs Node.js ~50-100MB
 - **异步非阻塞** - 基于 tokio + reqwest 的异步请求
 - **300+ 开箱即用的 API 接口** - 与 Node.js 版本 1:1 对应
@@ -445,6 +445,8 @@ axum::serve(listener, app).await?;
 | `song_lyrics_mark_del` | 删除歌词摘录 |
 | `song_lyrics_mark_user_page` | 我的歌词本 |
 | `audio_match` | 听歌识曲 |
+| `song_copyright_rcmd` | 灰色歌曲的其他版本推荐 |
+| `song_creators` | 歌曲创作者信息 |
 
 </details>
 
@@ -507,6 +509,7 @@ axum::serve(listener, app).await?;
 | 方法名 | 说明 |
 |--------|------|
 | `comment_music` | 歌曲评论 |
+| `comment` | 发送/删除/回复评论 |
 | `comment_album` | 专辑评论 |
 | `comment_playlist` | 歌单评论 |
 | `comment_mv` | MV 评论 |
@@ -517,12 +520,11 @@ axum::serve(listener, app).await?;
 | `comment_hot` | 热门评论 |
 | `comment_like` | 点赞评论 |
 | `comment_new` | 新版评论 |
-| `comment_reply` | 回复评论 |
-| `comment_delete` | 删除评论 |
 | `comment_hug_list` | 抱一抱列表 |
 | `comment_info_list` | 评论统计 |
 | `hug_comment` | 抱一抱评论 |
 | `starpick_comments_summary` | 精选评论摘要 |
+| `comment_report` | 举报评论 |
 
 </details>
 
@@ -695,6 +697,8 @@ axum::serve(listener, app).await?;
 | `top_playlist` | 歌单(网友精选碟) |
 | `top_playlist_highquality` | 精品歌单 |
 | `top_list` | 排行榜详情 |
+| `chart_detail` | 指定维度音乐排行榜详情 |
+| `chart_song_detail` | 指定维度音乐排行榜列表 |
 
 </details>
 
@@ -746,8 +750,11 @@ axum::serve(listener, app).await?;
 | `vip_info` | VIP 信息 |
 | `vip_info_v2` | VIP 信息 v2 |
 | `vip_sign` | 黑胶乐签打卡 |
+| `vip_sign_detail` | 黑胶乐签打卡详情 |
+| `vip_sign_history` | 黑胶乐签打卡历史 |
 | `vip_sign_info` | 打卡信息 |
 | `vip_tasks` | VIP 任务列表 |
+| `vip_tasks_v1` | 会员任务（新版） |
 | `vip_timemachine` | 时光机 |
 | `vip_growthpoint` | 成长值基本信息 |
 | `vip_growthpoint_details` | 成长值明细 |
@@ -840,6 +847,20 @@ axum::serve(listener, app).await?;
 </details>
 
 <details>
+<summary><strong>助眠解压</strong></summary>
+
+| 方法名 | 说明 |
+|--------|------|
+| `sati_tag_list` | 标签列表 |
+| `sati_resource_list` | 标签下资源列表 |
+| `sati_resource_list_more` | 同类推荐 |
+| `sati_resource_sub` | 收藏 |
+| `sati_resource_sub_list` | 收藏列表 |
+| `sati_timescene_resources_get` | 特定时间场景下的推荐资源 |
+
+</details>
+
+<details>
 <summary><strong>音乐人</strong></summary>
 
 | 方法名 | 说明 |
@@ -910,6 +931,7 @@ axum::serve(listener, app).await?;
 | `broadcast_channel_currentinfo` | 电台信息 |
 | `broadcast_channel_collect_list` | 我的收藏 |
 | `broadcast_sub` | 收藏/取消电台 |
+| `radio_sport_get` | 跑步漫游 |
 
 </details>
 
@@ -928,6 +950,8 @@ axum::serve(listener, app).await?;
 | `inner_version` | 内部版本号 |
 | `weblog` | 日志上报 |
 | `eapi_decrypt` | EAPI 解密 |
+| `decrypt` | 通用解密（eapi/weapi/linuxapi/xeapi/api） |
+| `lbs_city_code` | 多级行政区划数据 |
 | `sign_happy_info` | 乐签信息 |
 | `signin_progress` | 签到进度 |
 | `summary_annual` | 年度总结 |

@@ -9,11 +9,12 @@ impl ApiClient {
     /// 创建歌单
     /// 对应 /playlist/create
     pub async fn playlist_create(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "name": query.get_or("name", ""),
             "privacy": query.get_or("privacy", "0"),
             "type": query.get_or("type", "NORMAL")
         });
+        query.drop_absent_params(&mut data, &[("name", "name")]);
         self.request(
             "/api/playlist/create",
             data,

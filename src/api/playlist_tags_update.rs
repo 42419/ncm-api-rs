@@ -9,10 +9,11 @@ impl ApiClient {
     /// 更新歌单标签
     /// 对应 /playlist/tags/update
     pub async fn playlist_tags_update(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "id": query.get_or("id", ""),
             "tags": query.get_or("tags", "")
         });
+        query.drop_absent_params(&mut data, &[("id", "id"), ("tags", "tags")]);
         self.request(
             "/api/playlist/tags/update",
             data,

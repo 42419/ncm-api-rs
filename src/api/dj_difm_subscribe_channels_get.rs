@@ -15,7 +15,7 @@ impl ApiClient {
         self.request(
             "/api/dj/difm/subscribe/channels/get/v2",
             data,
-            query.to_option(CryptoType::Weapi),
+            query.to_option(CryptoType::default()),
         )
         .await
     }

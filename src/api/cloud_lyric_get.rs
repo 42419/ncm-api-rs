@@ -9,12 +9,13 @@ impl ApiClient {
     /// 获取云盘歌词
     /// 对应 /cloud/lyric/get
     pub async fn cloud_lyric_get(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "userId": query.get_or("uid", ""),
             "songId": query.get_or("sid", ""),
             "lv": -1,
             "kv": -1
         });
+        query.drop_absent_params(&mut data, &[("songId", "sid"), ("userId", "uid")]);
         self.request(
             "/api/cloud/lyric/get",
             data,

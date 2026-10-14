@@ -9,13 +9,14 @@ impl ApiClient {
     /// 数字专辑-新碟上架
     /// 对应 /album/list
     pub async fn album_list(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "limit": query.get_or("limit", "30").parse::<i64>().unwrap_or(30),
             "offset": query.get_or("offset", "0").parse::<i64>().unwrap_or(0),
             "total": true,
             "area": query.get_or("area", "ALL"),
             "type": query.get_or("type", "")
         });
+        query.drop_absent_params(&mut data, &[("type", "type")]);
         self.request(
             "/api/vipmall/albumproduct/list",
             data,

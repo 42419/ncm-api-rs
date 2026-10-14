@@ -9,13 +9,14 @@ impl ApiClient {
     /// 云贝推歌
     /// 对应 /yunbei/rcmd/song
     pub async fn yunbei_rcmd_song(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "songId": query.get_or("id", ""),
             "reason": query.get_or("reason", "好歌献给你"),
             "scene": "",
             "fromUserId": -1,
             "yunbeiNum": query.get_or("yunbeiNum", "10").parse::<i64>().unwrap_or(10)
         });
+        query.drop_absent_params(&mut data, &[("songId", "id")]);
         self.request(
             "/api/yunbei/rcmd/song/submit",
             data,

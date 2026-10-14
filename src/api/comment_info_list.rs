@@ -22,8 +22,14 @@ impl ApiClient {
             })
             .unwrap_or_else(|| "0".to_string());
 
-        let ids: Vec<String> = query
-            .get_or("ids", "")
+        // 上游 `String(query.ids || query.id || '')`：ids 为空时回退到 id
+        let ids_raw = query
+            .get("ids")
+            .filter(|s| !s.is_empty())
+            .or_else(|| query.get("id").filter(|s| !s.is_empty()))
+            .unwrap_or("")
+            .to_string();
+        let ids: Vec<String> = ids_raw
             .split(',')
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())

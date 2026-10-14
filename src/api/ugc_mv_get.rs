@@ -9,9 +9,10 @@ impl ApiClient {
     /// MV简要百科信息
     /// 对应 /ugc/mv/get
     pub async fn ugc_mv_get(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "mvId": query.get_or("id", "")
         });
+        query.drop_absent_params(&mut data, &[("mvId", "id")]);
         self.request(
             "/api/rep/ugc/mv/get",
             data,

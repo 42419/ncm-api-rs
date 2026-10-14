@@ -9,9 +9,10 @@ impl ApiClient {
     /// 数字专辑销量
     /// 对应 /digitalAlbum/sales
     pub async fn digital_album_sales(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "albumIds": query.get_or("ids", "")
         });
+        query.drop_absent_params(&mut data, &[("albumIds", "ids")]);
         self.request(
             "/api/vipmall/albumproduct/album/query/sales",
             data,

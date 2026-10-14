@@ -9,9 +9,10 @@ impl ApiClient {
     /// 声音歌词
     /// 对应 /voice/lyric
     pub async fn voice_lyric(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "programId": query.get_or("id", "")
         });
+        query.drop_absent_params(&mut data, &[("programId", "id")]);
         self.request(
             "/api/voice/lyric/get",
             data,

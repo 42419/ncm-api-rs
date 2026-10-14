@@ -9,7 +9,7 @@ impl ApiClient {
     /// 更新用户资料
     /// 对应 /user/update
     pub async fn user_update(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "birthday": query.get_or("birthday", ""),
             "city": query.get_or("city", ""),
             "gender": query.get_or("gender", ""),
@@ -17,6 +17,17 @@ impl ApiClient {
             "province": query.get_or("province", ""),
             "signature": query.get_or("signature", "")
         });
+        query.drop_absent_params(
+            &mut data,
+            &[
+                ("birthday", "birthday"),
+                ("city", "city"),
+                ("gender", "gender"),
+                ("nickname", "nickname"),
+                ("province", "province"),
+                ("signature", "signature"),
+            ],
+        );
         self.request(
             "/api/user/profile/update",
             data,

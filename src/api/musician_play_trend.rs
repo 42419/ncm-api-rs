@@ -9,10 +9,14 @@ impl ApiClient {
     /// 音乐人歌曲播放趋势
     /// 对应 /musician/play/trend
     pub async fn musician_play_trend(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "startTime": query.get_or("startTime", ""),
             "endTime": query.get_or("endTime", "")
         });
+        query.drop_absent_params(
+            &mut data,
+            &[("endTime", "endTime"), ("startTime", "startTime")],
+        );
         self.request(
             "/api/creator/musician/play/count/statistic/data/trend/get",
             data,

@@ -30,7 +30,19 @@ impl ApiClient {
                 "multiSongs": serde_json::to_string(&multi_songs).unwrap_or_default()
             })
         } else {
-            let playlist_name = query.get_or("playlistName", "");
+            // 上游 `query.playlistName || '导入音乐 '.concat(new Date().toLocaleString())`
+            // 注意：`toLocaleString()` 依赖运行环境的 locale / 时区，无法完全复现；
+            // 这里按 V8 默认的 en-US 风格近似（如 `导入音乐 10/13/2026, 3:45:12 PM`）。
+            let playlist_name = query
+                .get("playlistName")
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| {
+                    format!(
+                        "导入音乐 {}",
+                        chrono::Local::now().format("%m/%d/%Y, %I:%M:%S %p")
+                    )
+                });
 
             let songs = if let Some(text) = query.get("text") {
                 // 文字导入

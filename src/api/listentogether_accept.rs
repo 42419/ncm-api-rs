@@ -9,11 +9,15 @@ impl ApiClient {
     /// 一起听 接受邀请
     /// 对应 /listentogether/accept
     pub async fn listentogether_accept(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "refer": "inbox_invite",
             "roomId": query.get_or("roomId", ""),
             "inviterId": query.get_or("inviterId", "")
         });
+        query.drop_absent_params(
+            &mut data,
+            &[("inviterId", "inviterId"), ("roomId", "roomId")],
+        );
         self.request(
             "/api/listen/together/play/invitation/accept",
             data,

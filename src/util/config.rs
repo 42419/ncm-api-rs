@@ -4,6 +4,13 @@ use std::sync::LazyLock;
 
 pub const API_DOMAIN: &str = "https://interface.music.163.com";
 pub const DOMAIN: &str = "https://music.163.com";
+/// XEAPI 专用域名（对应 Node util/request.js 的 XEAPI_DOMAIN）
+pub const XEAPI_DOMAIN: &str = "https://interface3.music.163.com";
+/// XEAPI 公钥获取接口
+pub const XEAPI_PUBLIC_KEY_URL: &str =
+    "https://interface.music.163.com/api/gorilla/anti/crawler/security/key/get";
+/// XEAPI 请求使用的 User-Agent（Android 客户端）
+pub const XEAPI_USER_AGENT: &str = "NeteaseMusic/9.1.65.240927161425(9001065);Dalvik/2.1.0 (Linux; U; Android 14; 23013RK75C Build/UKQ1.230804.001)";
 pub const ENCRYPT: bool = true;
 pub const ENCRYPT_RESPONSE: bool = false;
 pub const CLIENT_SIGN: &str = "18:C0:4D:B9:8F:FE@@@453832335F384641365F424635335F303030315F303031425F343434415F343643365F333638332@@@@@@6ff673ef74955b38bce2fa8562d95c976ed4758b1227c4e9ee345987cee17bc9";

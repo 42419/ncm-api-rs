@@ -9,13 +9,14 @@ impl ApiClient {
     /// DIFM电台 - 取消收藏频道
     /// 对应 /dj/difm/channel/unsubscribe
     pub async fn dj_difm_channel_unsubscribe(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "id": query.get_or("id", "")
         });
+        query.drop_absent_params(&mut data, &[("id", "id")]);
         self.request(
             "/api/dj/difm/channel/unsubscribe",
             data,
-            query.to_option(CryptoType::Weapi),
+            query.to_option(CryptoType::default()),
         )
         .await
     }

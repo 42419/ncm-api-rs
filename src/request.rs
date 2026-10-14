@@ -3,16 +3,18 @@
 /// 核心功能：构造加密请求、Cookie 管理、UA 伪装
 use crate::crypto;
 use crate::error::{NcmError, Result};
+use crate::util;
 use crate::util::config::*;
 use crate::util::cookie::{cookie_obj_to_string, cookie_to_json};
 use crate::util::device::{generate_device_id, generate_wnmcid, random_hex};
 use crate::util::ip::generate_random_chinese_ip;
 
-use reqwest::header::{HeaderMap, HeaderValue, COOKIE, REFERER, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, COOKIE, REFERER, USER_AGENT};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
+use tokio::sync::RwLock;
 
 /// 特殊状态码集合（视为 200）
 static SPECIAL_STATUS_CODES: LazyLock<std::collections::HashSet<i64>> =
@@ -45,6 +47,7 @@ pub enum CryptoType {
     #[default]
     Eapi,
     Linuxapi,
+    Xeapi,
     Api, // 明文
 }
 
@@ -54,6 +57,7 @@ impl CryptoType {
             CryptoType::Weapi => "weapi",
             CryptoType::Eapi => "eapi",
             CryptoType::Linuxapi => "linuxapi",
+            CryptoType::Xeapi => "xeapi",
             CryptoType::Api => "api",
         }
     }
@@ -64,6 +68,7 @@ impl From<&str> for CryptoType {
         match s {
             "weapi" => CryptoType::Weapi,
             "linuxapi" => CryptoType::Linuxapi,
+            "xeapi" => CryptoType::Xeapi,
             "api" => CryptoType::Api,
             _ => CryptoType::Eapi,
         }
@@ -101,6 +106,14 @@ pub struct ApiClient {
     anonymous_token: Option<String>,
     /// 自定义设备 ID，None 则使用全局默认值
     device_id: Option<String>,
+    /// XEAPI 动态公钥缓存
+    ///
+    /// 对应 Node 侧 tmpdir 下的 `xeapi_public_key` 文件：Node 需先由
+    /// `generateConfig.js` 写好文件，否则请求会抛 `xeapi public key is missing`；
+    /// Rust 侧改为首次使用时按需拉取。
+    xeapi_public_key: Arc<RwLock<Option<crypto::XeapiPublicKeyState>>>,
+    /// XEAPI 会话 (id, key)，来自响应头 `x-encr-ssid` / `x-encr-sskey`
+    xeapi_session: Arc<RwLock<Option<(String, String)>>>,
 }
 
 impl ApiClient {
@@ -110,12 +123,7 @@ impl ApiClient {
             .build()
             .expect("Failed to create HTTP client");
 
-        Self {
-            client,
-            cookie,
-            anonymous_token: None,
-            device_id: None,
-        }
+        Self::from_client(client, cookie)
     }
 
     /// 创建带代理的 API 客户端
@@ -127,12 +135,18 @@ impl ApiClient {
             .build()
             .map_err(NcmError::Http)?;
 
-        Ok(Self {
+        Ok(Self::from_client(client, cookie))
+    }
+
+    fn from_client(client: reqwest::Client, cookie: Option<String>) -> Self {
+        Self {
             client,
             cookie,
             anonymous_token: None,
             device_id: None,
-        })
+            xeapi_public_key: Arc::new(RwLock::new(None)),
+            xeapi_session: Arc::new(RwLock::new(None)),
+        }
     }
 
     /// 设置 cookie
@@ -155,6 +169,34 @@ impl ApiClient {
     /// 获取当前设备 ID（自定义优先，否则使用全局默认）
     fn get_device_id(&self) -> &str {
         self.device_id.as_deref().unwrap_or(&DEVICE_ID)
+    }
+
+    /// 获取 XEAPI 动态公钥；缓存为空时按需拉取
+    async fn ensure_xeapi_public_key(&self) -> Result<crypto::XeapiPublicKeyState> {
+        {
+            let cached = self.xeapi_public_key.read().await;
+            if let Some(state) = cached.as_ref() {
+                return Ok(state.clone());
+            }
+        }
+
+        let current = self.xeapi_public_key.read().await.clone();
+        let state = util::xeapi_key::fetch_xeapi_public_key(
+            &self.client,
+            current.as_ref(),
+            self.get_device_id(),
+        )
+        .await
+        .map_err(NcmError::Crypto)?;
+
+        *self.xeapi_public_key.write().await = Some(state.clone());
+        Ok(state)
+    }
+
+    /// 刷新 XEAPI 动态公钥（丢弃缓存后重新拉取）
+    pub async fn refresh_xeapi_public_key(&self) -> Result<crypto::XeapiPublicKeyState> {
+        *self.xeapi_public_key.write().await = None;
+        self.ensure_xeapi_public_key().await
     }
 
     /// 发起 API 请求 - 核心方法
@@ -291,6 +333,110 @@ impl ApiClient {
                 encrypt_data = crypto::linuxapi(&linux_data);
                 url = format!("{}/api/linux/forward", ref_domain);
             }
+            CryptoType::Xeapi => {
+                // XEAPI 依赖动态公钥：Node 侧由 generateConfig.js 预先把公钥写入
+                // tmpdir/xeapi_public_key，缺失时 request.js 直接抛错；Rust 侧按需拉取
+                let public_key_state = self.ensure_xeapi_public_key().await?;
+
+                let now_secs = chrono::Utc::now().timestamp().to_string();
+                let device_id = cookie_map.get("deviceId").cloned().unwrap_or_default();
+
+                // Node: cookie.os === 'android' ? cookie.os : 'android'
+                let is_android = cookie_map.get("os").map(|os| os.as_str()) == Some("android");
+                let xeapi_os = "android";
+                let xeapi_appver = if is_android {
+                    cookie_map
+                        .get("appver")
+                        .cloned()
+                        .unwrap_or_else(|| "9.1.65".to_string())
+                } else {
+                    "9.1.65".to_string()
+                };
+                let xeapi_osver = if is_android {
+                    cookie_map
+                        .get("osver")
+                        .cloned()
+                        .unwrap_or_else(|| "16".to_string())
+                } else {
+                    "16".to_string()
+                };
+                let xeapi_buildver = cookie_map
+                    .get("buildver")
+                    .cloned()
+                    .unwrap_or_else(|| now_secs[..10].to_string());
+
+                let xeapi_domain = if domain.is_empty() {
+                    XEAPI_DOMAIN
+                } else {
+                    domain
+                };
+                let sdevice_id = cookie_map
+                    .get("sDeviceId")
+                    .cloned()
+                    .unwrap_or_else(|| device_id.clone());
+
+                headers.insert(
+                    USER_AGENT,
+                    header_value(
+                        options
+                            .ua
+                            .as_deref()
+                            .unwrap_or_else(|| choose_user_agent("api", "android")),
+                    ),
+                );
+                headers.insert("X-Client-Enc-State", HeaderValue::from_static("ENCRYPTED"));
+                headers.insert("x-aeapi", HeaderValue::from_static("true"));
+                headers.insert(
+                    CONTENT_TYPE,
+                    HeaderValue::from_static("application/x-www-form-urlencoded;charset=utf-8"),
+                );
+                headers.insert("x-deviceid", header_value(&device_id));
+                headers.insert("x-os", header_value(xeapi_os));
+                headers.insert("x-osver", header_value(&xeapi_osver));
+                headers.insert("x-appver", header_value(&xeapi_appver));
+                headers.insert("x-sdeviceid", header_value(&sdevice_id));
+                headers.insert("x-buildver", header_value(&xeapi_buildver));
+                if let Some(music_u) = cookie_map.get("MUSIC_U") {
+                    headers.insert("x-music-u", header_value(music_u));
+                }
+
+                let mut xeapi_cookie = cookie_map.clone();
+                xeapi_cookie.insert("os".to_string(), xeapi_os.to_string());
+                xeapi_cookie.insert("osver".to_string(), xeapi_osver.clone());
+                xeapi_cookie.insert("appver".to_string(), xeapi_appver.clone());
+                xeapi_cookie.insert("buildver".to_string(), xeapi_buildver.clone());
+                xeapi_cookie.insert("deviceId".to_string(), device_id.clone());
+                xeapi_cookie.insert("sDeviceId".to_string(), sdevice_id.clone());
+                headers.insert(COOKIE, header_value(&cookie_obj_to_string(&xeapi_cookie)));
+
+                // 会话密钥来自上一次响应头，存在则复用（Node 里是模块级全局变量）
+                let session = self.xeapi_session.read().await.clone();
+                let (session_id, session_key) = match session {
+                    Some((id, key)) => (Some(id), Some(key)),
+                    None => (None, None),
+                };
+
+                let encrypted = crypto::xeapi(
+                    uri,
+                    &data,
+                    &crypto::XeapiEncryptOptions {
+                        public_key_state: &public_key_state,
+                        session_id: session_id.as_deref(),
+                        session_key: session_key.as_deref(),
+                        os: xeapi_os,
+                        content_type: None,
+                        method: None,
+                    },
+                )
+                .map_err(NcmError::Crypto)?;
+
+                encrypt_data = HashMap::from([
+                    ("B".to_string(), encrypted.b),
+                    ("S".to_string(), encrypted.s),
+                    ("R".to_string(), encrypted.r),
+                ]);
+                url = format!("{}/xeapi/{}", xeapi_domain, &uri[5..]);
+            }
             CryptoType::Eapi | CryptoType::Api => {
                 // 构造 eapi header cookie
                 let now_secs = chrono::Utc::now().timestamp().to_string();
@@ -416,11 +562,12 @@ impl ApiClient {
         let body = serde_urlencoded::to_string(&encrypt_data)
             .map_err(|e| NcmError::Unknown(e.to_string()))?;
 
-        // 设置 Content-Type
-        headers.insert(
-            reqwest::header::CONTENT_TYPE,
-            HeaderValue::from_static("application/x-www-form-urlencoded"),
-        );
+        // 设置 Content-Type（XEAPI 分支已自行写入带 charset 的版本，不覆盖）
+        headers
+            .entry(CONTENT_TYPE)
+            .or_insert(HeaderValue::from_static(
+                "application/x-www-form-urlencoded",
+            ));
 
         // 构造请求并发送（按需使用代理）
         let response = if let Some(ref proxy_url) = options.proxy {
@@ -461,7 +608,33 @@ impl ApiClient {
         let e_r = options.e_r.unwrap_or(false);
         let status_code = response.status().as_u16() as i64;
 
-        let body: Value = if crypto_type == CryptoType::Eapi && e_r {
+        // XEAPI 会话密钥由响应头下发，需在消费响应体之前取出
+        let xeapi_session_headers = if crypto_type == CryptoType::Xeapi {
+            let session_id = response
+                .headers()
+                .get("x-encr-ssid")
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_string);
+            let session_key = response
+                .headers()
+                .get("x-encr-sskey")
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_string);
+            match (session_id, session_key) {
+                (Some(id), Some(key)) => Some((id, key)),
+                _ => None,
+            }
+        } else {
+            None
+        };
+
+        let body: Value = if crypto_type == CryptoType::Xeapi {
+            let bytes = response.bytes().await?;
+            if let Some((session_id, session_key)) = xeapi_session_headers {
+                *self.xeapi_session.write().await = Some((session_id, session_key));
+            }
+            crypto::xeapi_res_decrypt(&bytes).unwrap_or(Value::Null)
+        } else if crypto_type == CryptoType::Eapi && e_r {
             let bytes = response.bytes().await?;
             let hex_str = hex::encode_upper(&bytes);
             crypto::eapi_res_decrypt(&hex_str).unwrap_or(Value::Null)

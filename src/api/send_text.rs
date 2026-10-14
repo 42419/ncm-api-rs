@@ -9,11 +9,12 @@ impl ApiClient {
     /// 私信
     /// 对应 /send/text
     pub async fn send_text(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "type": "text",
             "msg": query.get_or("msg", ""),
             "userIds": format!("[{}]", query.get_or("user_ids", ""))
         });
+        query.drop_absent_params(&mut data, &[("msg", "msg")]);
         self.request(
             "/api/msg/private/send",
             data,

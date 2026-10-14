@@ -16,9 +16,10 @@ impl ApiClient {
             "duration": query.get_or("duration", "0").parse::<i64>().unwrap_or(0),
             "persistId": query.get_or("md5", ""),
         }]);
-        let data = json!({
+        let mut data = json!({
             "songs": songs.to_string(),
         });
+        query.drop_absent_params(&mut data, &[("persistId", "md5")]);
         self.request(
             "/api/search/match/new",
             data,

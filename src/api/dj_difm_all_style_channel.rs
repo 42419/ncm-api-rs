@@ -15,7 +15,7 @@ impl ApiClient {
         self.request(
             "/api/dj/difm/all/style/channel/v2",
             data,
-            query.to_option(CryptoType::Weapi),
+            query.to_option(CryptoType::default()),
         )
         .await
     }

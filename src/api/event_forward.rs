@@ -9,11 +9,12 @@ impl ApiClient {
     /// 转发动态
     /// 对应 /event/forward
     pub async fn event_forward(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "forwards": query.get_or("forwards", ""),
             "id": query.get_or("evId", "0"),
             "eventUserId": query.get_or("uid", "0")
         });
+        query.drop_absent_params(&mut data, &[("forwards", "forwards")]);
         self.request(
             "/api/event/forward",
             data,

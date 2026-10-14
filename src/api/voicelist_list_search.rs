@@ -9,7 +9,7 @@ impl ApiClient {
     /// 声音搜索
     /// 对应 /voicelist/list/search
     pub async fn voicelist_list_search(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "limit": query.get_or("limit", "200"),
             "offset": query.get_or("offset", "0"),
             "name": query.get("name").unwrap_or(""),
@@ -18,6 +18,7 @@ impl ApiClient {
             "voiceFeeType": query.get("voiceFeeType").unwrap_or(""),
             "radioId": query.get_or("voiceListId", "")
         });
+        query.drop_absent_params(&mut data, &[("radioId", "voiceListId")]);
         self.request(
             "/api/voice/workbench/voice/list",
             data,

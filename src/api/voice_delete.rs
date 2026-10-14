@@ -9,9 +9,10 @@ impl ApiClient {
     /// 删除声音
     /// 对应 /voice/delete
     pub async fn voice_delete(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "ids": query.get_or("ids", "")
         });
+        query.drop_absent_params(&mut data, &[("ids", "ids")]);
         self.request(
             "/api/content/voice/delete",
             data,

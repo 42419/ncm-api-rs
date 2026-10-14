@@ -1,4 +1,5 @@
 use super::Query;
+use crate::crypto::strip_js_whitespace;
 use crate::error::Result;
 /// 上传音频（声音）
 /// 对应 Node.js module/voice_upload.js
@@ -7,6 +8,27 @@ use crate::error::Result;
 /// 由于 Rust SDK 是纯库，文件读取由调用者负责，需传入完整的音频二进制数据。
 use crate::request::{ApiClient, ApiResponse, CryptoType};
 use serde_json::json;
+
+/// 对应上游 util/fileHelper.js 的 `getFileExtension`：
+/// 取最后一个点之后的部分并小写化，没有扩展名时回落到 `"mp3"`
+fn file_extension(filename: &str) -> String {
+    if !filename.is_empty() && filename.contains('.') {
+        filename.rsplit('.').next().unwrap_or("mp3").to_lowercase()
+    } else {
+        "mp3".to_string()
+    }
+}
+
+/// 对应上游 voice_upload.js 的
+/// `name.replace('.' + ext, '').replace(/\s/g, '').replace(/\./g, '_')`
+///
+/// 注意 `String.prototype.replace(string, …)` 只替换**第一处**，且 `ext` 已
+/// 小写化——因此 `Song.MP3` 这种大写扩展名是匹配不上的，这里如实复现。
+fn voice_filename(file_name: &str, ext: &str) -> String {
+    let needle = format!(".{}", ext);
+    let stripped = file_name.replacen(needle.as_str(), "", 1);
+    strip_js_whitespace(&stripped).replace('.', "_")
+}
 
 impl ApiClient {
     /// 上传音频文件
@@ -38,18 +60,14 @@ impl ApiClient {
         let mimetype = file_mimetype.unwrap_or("audio/mpeg");
 
         // 提取文件扩展名
-        let ext = file_name.rsplit('.').next().unwrap_or("mp3");
+        let ext = file_extension(file_name);
 
         // 推断文件名
-        let filename = if let Some(name) = query.get("songName") {
-            name.to_string()
-        } else {
-            file_name
-                .rsplit('.')
-                .next_back()
-                .unwrap_or(file_name)
-                .replace(' ', "")
-                .replace('.', "_")
+        // 上游是 `query.songName || <从文件名推断>`，空字符串在 JS 里是 falsy，
+        // 会继续回退到文件名推断，所以这里也要把空串当作未提供。
+        let filename = match query.get("songName").filter(|s| !s.is_empty()) {
+            Some(name) => name.to_string(),
+            None => voice_filename(file_name, &ext),
         };
 
         // Step 1: 申请上传 token
@@ -171,7 +189,9 @@ impl ApiClient {
             .map(|s| s.split(',').map(|x| x.to_string()).collect())
             .unwrap_or_default();
 
-        let voice_data = json!([{
+        // 上游 voiceData 里 description / voiceListId / coverImgId / categoryId /
+        // secondCategoryId 为裸取值，缺省时丢键
+        let mut voice_item = json!({
             "name": filename,
             "autoPublish": auto_publish,
             "autoPublishText": query.get_or("autoPublishText", ""),
@@ -185,9 +205,19 @@ impl ApiClient {
             "privacy": privacy,
             "publishTime": query.get_or("publishTime", "0").parse::<i64>().unwrap_or(0),
             "orderNo": query.get_or("orderNo", "1").parse::<i64>().unwrap_or(1),
-        }]);
+        });
+        query.drop_absent_params(
+            &mut voice_item,
+            &[
+                ("description", "description"),
+                ("voiceListId", "voiceListId"),
+                ("coverImgId", "coverImgId"),
+                ("categoryId", "categoryId"),
+                ("secondCategoryId", "secondCategoryId"),
+            ],
+        );
 
-        let voice_data_str = serde_json::to_string(&voice_data).unwrap_or_default();
+        let voice_data_str = json!([voice_item]).to_string();
 
         // Step 6: preCheck
         let _pre_check = self
@@ -242,4 +272,63 @@ fn generate_dupkey() -> String {
     s[23] = b'-';
 
     String::from_utf8_lossy(&s).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 期望值由上游 `util/fileHelper.js` 的 `getFileExtension` 与
+    /// `voice_upload.js` 的 `name.replace('.'+ext,'').replace(/\s/g,'').replace(/\./g,'_')`
+    /// 在 Node 22 上跑出
+    #[test]
+    fn test_file_extension_matches_upstream() {
+        let cases = [
+            ("song.mp3", "mp3"),
+            // 大写扩展名会被小写化
+            ("Song.MP3", "mp3"),
+            ("a.b.mp3", "mp3"),
+            ("a.b.c", "c"),
+            // 以点结尾时扩展名是空串
+            ("a.", ""),
+            ("a.b.", ""),
+            (".hidden", "hidden"),
+            ("noext", "mp3"),
+            ("", "mp3"),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(file_extension(input), expected, "输入 {input:?}");
+        }
+    }
+
+    #[test]
+    fn test_voice_filename_matches_upstream() {
+        let cases = [
+            ("song.mp3", "song"),
+            // ext 已小写化，'.mp3' 匹配不上 '.MP3'，所以扩展名无法被去掉
+            ("Song.MP3", "Song_MP3"),
+            ("a.b.mp3", "a_b"),
+            // 只去掉最后一个点之后的部分
+            ("a.b.c", "a_b"),
+            ("a.", "a"),
+            // ext 为空串时等价于 replace('.', '')，只删掉第一处点
+            ("a.b.", "ab_"),
+            (".hidden", ""),
+            ("noext", "noext"),
+            ("with space.mp3", "withspace"),
+            ("with\ttab.mp3", "withtab"),
+            ("full\u{3000}width.mp3", "fullwidth"),
+            ("nbsp\u{00a0}here.mp3", "nbsphere"),
+            ("multi  dots .mp3", "multidots"),
+            ("", ""),
+        ];
+        for (input, expected) in cases {
+            let ext = file_extension(input);
+            assert_eq!(
+                voice_filename(input, &ext),
+                expected,
+                "输入 {input:?}（ext={ext:?}）"
+            );
+        }
+    }
 }

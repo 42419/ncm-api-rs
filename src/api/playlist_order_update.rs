@@ -9,9 +9,10 @@ impl ApiClient {
     /// 歌单排序更新
     /// 对应 /playlist/order/update
     pub async fn playlist_order_update(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "ids": query.get_or("ids", "")
         });
+        query.drop_absent_params(&mut data, &[("ids", "ids")]);
         self.request(
             "/api/playlist/order/update",
             data,

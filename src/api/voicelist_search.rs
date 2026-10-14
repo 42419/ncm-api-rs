@@ -19,7 +19,7 @@ impl ApiClient {
         self.request(
             "/api/search/voicelist/get",
             data,
-            query.to_option(CryptoType::Weapi),
+            query.to_option(CryptoType::default()),
         )
         .await
     }

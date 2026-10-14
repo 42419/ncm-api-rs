@@ -9,11 +9,12 @@ impl ApiClient {
     /// 歌单动态信息
     /// 对应 /playlist/detail/dynamic
     pub async fn playlist_detail_dynamic(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "id": query.get_or("id", ""),
             "n": 100000,
             "s": query.get_or("s", "8").parse::<i64>().unwrap_or(8)
         });
+        query.drop_absent_params(&mut data, &[("id", "id")]);
         self.request(
             "/api/playlist/detail/dynamic",
             data,

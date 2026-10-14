@@ -14,11 +14,12 @@ impl ApiClient {
         } else {
             "true"
         };
-        let data = json!({
+        let mut data = json!({
             "contentType": "BROADCAST",
             "contentId": query.get_or("id", ""),
             "cancelCollect": cancel_collect
         });
+        query.drop_absent_params(&mut data, &[("contentId", "id")]);
         self.request(
             "/api/content/interact/collect",
             data,

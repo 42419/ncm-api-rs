@@ -2,7 +2,8 @@
 ///
 /// 每个 API 接口拆分为独立文件，通过 `impl ApiClient` 扩展方法
 /// 所有方法统一使用 `Query` 对象传参
-use crate::request::{CryptoType, RequestOption};
+use crate::request::{ApiResponse, CryptoType, RequestOption};
+use serde_json::{Map, Value};
 use std::collections::HashMap;
 
 // ---- 歌曲相关 ----
@@ -119,7 +120,6 @@ mod album_sublist;
 // ---- 评论相关 ----
 mod comment;
 mod comment_album;
-mod comment_delete;
 mod comment_dj;
 mod comment_event;
 mod comment_floor;
@@ -130,7 +130,6 @@ mod comment_like;
 mod comment_music;
 mod comment_mv;
 mod comment_new;
-mod comment_reply;
 mod comment_playlist;
 mod comment_report;
 mod comment_video;
@@ -405,21 +404,21 @@ mod fanscenter_overview_get;
 mod fanscenter_trend_list;
 
 // ---- 声音相关 ----
-mod voice_delete;
-mod voice_detail;
-mod voice_lyric;
-mod voicelist_detail;
-mod voicelist_my_created;
-mod voicelist_list;
-mod voicelist_list_search;
-mod voicelist_search;
-mod voicelist_trans;
 mod sati_resource_list;
 mod sati_resource_list_more;
 mod sati_resource_sub;
 mod sati_resource_sub_list;
 mod sati_tag_list;
 mod sati_timescene_resources_get;
+mod voice_delete;
+mod voice_detail;
+mod voice_lyric;
+mod voicelist_detail;
+mod voicelist_list;
+mod voicelist_list_search;
+mod voicelist_my_created;
+mod voicelist_search;
+mod voicelist_trans;
 
 // ---- 私人 DJ ----
 mod aidj_content_rcmd;
@@ -445,8 +444,11 @@ mod vip_growthpoint_get;
 mod vip_info;
 mod vip_info_v2;
 mod vip_sign;
+mod vip_sign_detail;
+mod vip_sign_history;
 mod vip_sign_info;
 mod vip_tasks;
+mod vip_tasks_v1;
 mod vip_timemachine;
 
 // ---- 云贝相关 ----
@@ -470,7 +472,8 @@ mod cloud_match;
 mod cloud_upload_complete;
 mod cloud_upload_token;
 
-// ---- EAPI 工具 ----
+// ---- 加解密工具 ----
+mod decrypt;
 mod eapi_decrypt;
 
 // ---- 其他 ----
@@ -562,8 +565,34 @@ impl Query {
         }
     }
 
+    /// 复刻 JS 对象字面量 `{ key: query.name }` 的语义。
+    ///
+    /// 上游大量使用 `key: query.name`：当 `query.name` 缺省（等价 JS 的
+    /// `undefined`）时，`JSON.stringify` 会**丢掉整个键**；而 Rust 侧常见的
+    /// `get_or("name", "")` 会把空串当成有效值发出去。在构建好请求体后，
+    /// 传入 `(JSON 键, 查询参数名)` 列表，即可把缺省的键删除。
+    ///
+    /// 注意：只对“上游为裸 `query.name`”的字段使用；带默认值的字段
+    /// （`query.name || 默认`）应继续用 `get_or` / `get_i64` 等。
+    pub fn drop_absent_params(&self, data: &mut Value, pairs: &[(&str, &str)]) {
+        if let Some(obj) = data.as_object_mut() {
+            for (key, param) in pairs {
+                if self.get(param).is_none() {
+                    obj.remove(*key);
+                }
+            }
+        }
+    }
+
     /// 构造 RequestOption
+    ///
+    /// 加密方式复刻上游 `util/option.js` 的 `crypto: query.crypto || crypto || ''`：
+    /// 只要请求带了非空的 `crypto` 参数，就会覆盖模块自带的默认值。
     pub(crate) fn to_option(&self, crypto: CryptoType) -> RequestOption {
+        let crypto = match self.get("crypto") {
+            Some(value) if !value.is_empty() => CryptoType::from(value),
+            _ => crypto,
+        };
         RequestOption {
             crypto,
             cookie: self.cookie.clone(),
@@ -576,4 +605,70 @@ impl Query {
             check_token: false,
         }
     }
+}
+
+// ============================================================
+//  JS 语义辅助
+// ============================================================
+
+/// 复刻上游的 `Promise.reject({ status, body })`。
+///
+/// Node 版在参数校验失败、或上游返回非预期结构时，会 reject 一个带 `status` /
+/// `body` 的对象，`server.js` 直接拿这两个字段当 HTTP 状态码与响应体返回。
+/// Rust 侧用一个非 2xx 的 [`ApiResponse`] 表达同样结果。
+pub(crate) fn reject(status: i64, body: Value) -> ApiResponse {
+    ApiResponse {
+        status,
+        body,
+        cookie: vec![],
+    }
+}
+
+/// 复刻上游对象字面量里 `obj.key` 的取值语义，用于拼接响应体。
+///
+/// - 键存在：原样带上，值即使是 `null` 也保留
+///   （`JSON.stringify({ a: null })` 是 `{"a":null}`）
+/// - 键不存在：等价于 JS 的 `undefined`，会被 `JSON.stringify` 丢掉
+///
+/// 典型场景是 `body: { ...checkRes.body }` 这类展开赋值。
+pub(crate) fn copy_if_present(src: &Value, key: &str, dst: &mut Map<String, Value>) {
+    if let Some(v) = src.get(key) {
+        dst.insert(key.to_string(), v.clone());
+    }
+}
+
+/// JS 的 falsy 判定：`undefined`、`null`、`false`、`0`、`""` 为假。
+///
+/// 上游大量使用 `a || b` 和 `if (!a)`，**空串同样是假值**——这是从 Rust 直译时
+/// 最容易漏的一处，因为 `query.get_or` / `if let Some(..)` 都会把空串当成有效值。
+pub(crate) fn is_js_falsy(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::Bool(b) => !*b,
+        Value::Number(n) => n.as_f64().map(|f| f == 0.0).unwrap_or(false),
+        Value::String(s) => s.is_empty(),
+        Value::Array(_) | Value::Object(_) => false,
+    }
+}
+
+/// 复刻 JS `parseInt(str)` 的十进制解析。
+///
+/// - 跳过前导空白，接受可选的 `+` / `-`
+/// - 取最长的数字前缀，`None` 表示 JS 的 `NaN`（含空串、纯符号、非数字开头）
+/// - 不处理 `0x` 十六进制前缀（上游参数里不会出现）
+pub(crate) fn js_parse_int(s: &str) -> Option<i64> {
+    let trimmed = s.trim_start();
+    let bytes = trimmed.as_bytes();
+    let mut end = 0;
+    if end < bytes.len() && (bytes[end] == b'+' || bytes[end] == b'-') {
+        end += 1;
+    }
+    let digits_start = end;
+    while end < bytes.len() && bytes[end].is_ascii_digit() {
+        end += 1;
+    }
+    if end == digits_start {
+        return None;
+    }
+    trimmed[..end].parse::<i64>().ok()
 }

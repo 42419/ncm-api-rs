@@ -9,9 +9,10 @@ impl ApiClient {
     /// 曲风详情
     /// 对应 /style/detail
     pub async fn style_detail(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "tagId": query.get_or("tagId", "")
         });
+        query.drop_absent_params(&mut data, &[("tagId", "tagId")]);
         self.request(
             "/api/style-tag/home/head",
             data,

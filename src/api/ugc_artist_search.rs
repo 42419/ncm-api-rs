@@ -9,10 +9,11 @@ impl ApiClient {
     /// 搜索歌手
     /// 对应 /ugc/artist/search
     pub async fn ugc_artist_search(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "keyword": query.get_or("keyword", ""),
             "limit": query.get_or("limit", "40")
         });
+        query.drop_absent_params(&mut data, &[("keyword", "keyword")]);
         self.request(
             "/api/rep/ugc/artist/search",
             data,

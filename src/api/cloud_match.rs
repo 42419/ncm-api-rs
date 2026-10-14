@@ -9,11 +9,19 @@ impl ApiClient {
     /// 云盘歌曲匹配纠正
     /// 对应 /cloud/match
     pub async fn cloud_match(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "userId": query.get_or("uid", ""),
             "songId": query.get_or("sid", ""),
             "adjustSongId": query.get_or("asid", "")
         });
+        query.drop_absent_params(
+            &mut data,
+            &[
+                ("adjustSongId", "asid"),
+                ("songId", "sid"),
+                ("userId", "uid"),
+            ],
+        );
         self.request(
             "/api/cloud/user/song/match",
             data,

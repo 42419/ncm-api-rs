@@ -9,11 +9,12 @@ impl ApiClient {
     /// 更新歌曲顺序
     /// 对应 /song/order/update
     pub async fn song_order_update(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "pid": query.get_or("pid", ""),
             "trackIds": query.get_or("ids", ""),
             "op": "update",
         });
+        query.drop_absent_params(&mut data, &[("pid", "pid"), ("trackIds", "ids")]);
         self.request(
             "/api/playlist/manipulate/tracks",
             data,

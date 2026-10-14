@@ -9,9 +9,10 @@ impl ApiClient {
     /// 歌曲简要百科信息
     /// 对应 /ugc/song/get
     pub async fn ugc_song_get(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "songId": query.get_or("id", "")
         });
+        query.drop_absent_params(&mut data, &[("songId", "id")]);
         self.request(
             "/api/rep/ugc/song/get",
             data,

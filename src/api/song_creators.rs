@@ -7,7 +7,8 @@ impl ApiClient {
     /// 歌曲创作者信息
     /// 对应 /song/creators
     pub async fn song_creators(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({ "songId": query.get_or("id", "") });
+        let mut data = json!({ "songId": query.get_or("id", "") });
+        query.drop_absent_params(&mut data, &[("songId", "id")]);
         self.request(
             "/api/song/creators",
             data,

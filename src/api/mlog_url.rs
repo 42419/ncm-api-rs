@@ -9,11 +9,12 @@ impl ApiClient {
     /// mlog链接
     /// 对应 /mlog/url
     pub async fn mlog_url(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "id": query.get_or("id", ""),
             "resolution": query.get_or("res", "1080").parse::<i64>().unwrap_or(1080),
             "type": 1
         });
+        query.drop_absent_params(&mut data, &[("id", "id")]);
         self.request(
             "/api/mlog/detail/v1",
             data,

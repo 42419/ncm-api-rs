@@ -9,9 +9,10 @@ impl ApiClient {
     /// 声音列表详情
     /// 对应 /voicelist/detail
     pub async fn voicelist_detail(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "id": query.get_or("id", "")
         });
+        query.drop_absent_params(&mut data, &[("id", "id")]);
         self.request(
             "/api/voice/workbench/voicelist/detail",
             data,

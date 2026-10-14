@@ -9,9 +9,10 @@ impl ApiClient {
     /// 将mlog id转为video id
     /// 对应 /mlog/to/video
     pub async fn mlog_to_video(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "mlogId": query.get_or("id", "")
         });
+        query.drop_absent_params(&mut data, &[("mlogId", "id")]);
         self.request(
             "/api/mlog/video/convert/id",
             data,

@@ -9,12 +9,13 @@ impl ApiClient {
     /// 曲风-歌单
     /// 对应 /style/playlist
     pub async fn style_playlist(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "cursor": query.get_or("cursor", "0").parse::<i64>().unwrap_or(0),
             "size": query.get_or("size", "20").parse::<i64>().unwrap_or(20),
             "tagId": query.get_or("tagId", ""),
             "sort": 0
         });
+        query.drop_absent_params(&mut data, &[("tagId", "tagId")]);
         self.request(
             "/api/style-tag/home/playlist",
             data,

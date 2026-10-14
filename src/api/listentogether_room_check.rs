@@ -9,9 +9,10 @@ impl ApiClient {
     /// 一起听 房间情况
     /// 对应 /listentogether/room/check
     pub async fn listentogether_room_check(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "roomId": query.get_or("roomId", "")
         });
+        query.drop_absent_params(&mut data, &[("roomId", "roomId")]);
         self.request(
             "/api/listen/together/room/check",
             data,

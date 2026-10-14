@@ -7,10 +7,11 @@ impl ApiClient {
     /// 助眠解压：获取标签下的资源列表
     /// 对应 /sati/resource/list
     pub async fn sati_resource_list(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "tag": query.get_or("tag", ""),
             "firstQuery": false,
         });
+        query.drop_absent_params(&mut data, &[("tag", "tag")]);
         self.request(
             "/api/voice/sati/resource/list",
             data,

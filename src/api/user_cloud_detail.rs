@@ -1,4 +1,5 @@
 use super::Query;
+use crate::crypto::strip_js_whitespace;
 use crate::error::Result;
 /// 用户云盘歌曲详情
 /// 对应 Node.js module/user_cloud_detail.js
@@ -9,9 +10,8 @@ impl ApiClient {
     /// 用户云盘歌曲详情
     /// 对应 /user/cloud/detail
     pub async fn user_cloud_detail(&self, query: &Query) -> Result<ApiResponse> {
-        let ids: Vec<String> = query
-            .get_or("id", "")
-            .replace(' ', "")
+        // 上游是 `query.id.replace(/\s/g, '').split(',')`
+        let ids: Vec<String> = strip_js_whitespace(&query.get_or("id", ""))
             .split(',')
             .map(|s| s.to_string())
             .filter(|s| !s.is_empty())

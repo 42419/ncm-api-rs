@@ -9,15 +9,16 @@ impl ApiClient {
     /// DIFM电台 - 播放列表
     /// 对应 /dj/difm/playing/tracks/list
     pub async fn dj_difm_playing_tracks_list(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "limit": query.get_or("limit", "5").parse::<i64>().unwrap_or(5),
             "source": query.get_or("source", "0").parse::<i64>().unwrap_or(0),
             "channelId": query.get_or("channelId", "")
         });
+        query.drop_absent_params(&mut data, &[("channelId", "channelId")]);
         self.request(
             "/api/dj/difm/playing/tracks/list",
             data,
-            query.to_option(CryptoType::Weapi),
+            query.to_option(CryptoType::default()),
         )
         .await
     }

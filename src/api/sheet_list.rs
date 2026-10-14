@@ -9,10 +9,11 @@ impl ApiClient {
     /// 乐谱列表
     /// 对应 /sheet/list
     pub async fn sheet_list(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "id": query.get_or("id", ""),
             "abTest": query.get_or("ab", "b")
         });
+        query.drop_absent_params(&mut data, &[("id", "id")]);
         self.request(
             "/api/music/sheet/list/v1",
             data,

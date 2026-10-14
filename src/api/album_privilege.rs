@@ -9,9 +9,10 @@ impl ApiClient {
     /// 获取专辑歌曲的音质
     /// 对应 /album/privilege
     pub async fn album_privilege(&self, query: &Query) -> Result<ApiResponse> {
-        let data = json!({
+        let mut data = json!({
             "id": query.get_or("id", "")
         });
+        query.drop_absent_params(&mut data, &[("id", "id")]);
         self.request(
             "/api/album/privilege",
             data,
