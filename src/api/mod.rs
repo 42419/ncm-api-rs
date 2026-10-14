@@ -512,6 +512,11 @@ pub struct Query {
     pub ua: Option<String>,
     pub e_r: Option<bool>,
     pub domain: Option<String>,
+    /// 是否附带反作弊 token（对应上游 `util/option.js` 的 `checkToken`）
+    ///
+    /// 上游取值是字符串（`'v2'` / `'v3'` 会触发动态 token），Rust 侧简化为
+    /// 布尔：真值即携带 `APP_CONF.checkToken` 里那个静态 token。
+    pub check_token: bool,
 }
 
 impl Query {
@@ -602,7 +607,7 @@ impl Query {
             random_cn_ip: self.random_cn_ip,
             e_r: self.e_r,
             domain: self.domain.clone(),
-            check_token: false,
+            check_token: self.check_token,
         }
     }
 }
@@ -671,4 +676,14 @@ pub(crate) fn js_parse_int(s: &str) -> Option<i64> {
         return None;
     }
     trimmed[..end].parse::<i64>().ok()
+}
+
+/// 复刻上游 `util/index.js` 的 `toBoolean(val)`。
+///
+/// - `'true'` / `'1'` 为真，其余为假（含 `'false'`、`'0'`、`''`）
+///
+/// 上游对 `''` 会原样返回空串（falsy），这里统一收敛成 `false`——
+/// 调用点只关心真值性，结果等价。
+pub(crate) fn js_to_boolean(value: &str) -> bool {
+    value == "true" || value == "1"
 }

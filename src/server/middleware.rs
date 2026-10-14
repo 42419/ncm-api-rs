@@ -119,18 +119,8 @@ pub async fn rate_limit_middleware(
     req: Request<axum::body::Body>,
     next: Next,
 ) -> Response {
-    // 从连接信息或 X-Forwarded-For 获取 IP
-    let ip = req
-        .headers()
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.split(',').next().unwrap_or("unknown").trim().to_string())
-        .or_else(|| {
-            req.extensions()
-                .get::<ConnectInfo<SocketAddr>>()
-                .map(|ci| ci.0.ip().to_string())
-        })
-        .unwrap_or_else(|| "unknown".to_string());
+    // 从连接信息或 X-Forwarded-For 获取 IP（与出站 IP 注入共用同一套规则）
+    let ip = resolve_client_ip(&req).unwrap_or_else(|| "unknown".to_string());
 
     if !limiter.check(&ip).await {
         tracing::warn!("Rate limited: {}", ip);
@@ -145,4 +135,106 @@ pub async fn rate_limit_middleware(
     }
 
     next.run(req).await
+}
+
+// ============================================================
+//  调用方 IP（对应 Express `app.set('trust proxy', true)` 下的 `req.ip`）
+// ============================================================
+
+/// 内部头：把解析出的调用方 IP 传给下游处理器
+///
+/// 用 `x-ncm-` 前缀避免与真实客户端头混淆；中间件每次都会覆盖或删除它，
+/// 外部伪造无效。
+pub(crate) const CLIENT_IP_HEADER: &str = "x-ncm-client-ip";
+
+/// 解析调用方 IP
+///
+/// 复刻 Express `app.set('trust proxy', true)` 下 `req.ip` 的取值：
+/// `X-Forwarded-For` **最左侧**（最远端调用方）优先，否则用 socket 对端地址；
+/// 两者都会剥掉 IPv4-mapped 的 `::ffff:` 前缀。
+///
+/// 注意与上游一致：**不做**回环地址归一（`127.0.0.1` 不等于 `::1`，
+/// 只有 `::1` 才会在 `server.js` 里被换成随机国内 IP）。
+pub(crate) fn resolve_client_ip(req: &Request<axum::body::Body>) -> Option<String> {
+    let forwarded = req
+        .headers()
+        .get("x-forwarded-for")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.split(',').next().unwrap_or("").trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    forwarded
+        .or_else(|| {
+            req.extensions()
+                .get::<ConnectInfo<SocketAddr>>()
+                .map(|ci| ci.0.ip().to_string())
+        })
+        .map(|ip| match ip.strip_prefix("::ffff:") {
+            Some(stripped) => stripped.to_string(),
+            None => ip,
+        })
+}
+
+/// 把调用方 IP 写入内部头，供 `extract_merged_query` 使用
+///
+/// 对应上游 `server.js` 里 `obj[2].ip` 的来源（`req.ip`）。
+/// 拿不到 IP 时**删除**该头，避免外部伪造的 `x-ncm-client-ip` 被采信。
+pub async fn client_ip_middleware(mut req: Request<axum::body::Body>, next: Next) -> Response {
+    match resolve_client_ip(&req).and_then(|ip| HeaderValue::from_str(&ip).ok()) {
+        Some(value) => {
+            req.headers_mut().insert(CLIENT_IP_HEADER, value);
+        }
+        None => {
+            req.headers_mut().remove(CLIENT_IP_HEADER);
+        }
+    }
+
+    next.run(req).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+
+    fn request_with_xff(value: Option<&str>) -> Request<Body> {
+        let mut builder = Request::builder();
+        if let Some(value) = value {
+            builder = builder.header("x-forwarded-for", value);
+        }
+        builder.body(Body::empty()).unwrap()
+    }
+
+    #[test]
+    fn test_forwarded_takes_leftmost() {
+        // 对应 app.set('trust proxy', true)：全部信任 → 取最左侧（最远端调用方）
+        let req = request_with_xff(Some("1.2.3.4, 5.6.7.8, 9.9.9.9"));
+        assert_eq!(resolve_client_ip(&req).as_deref(), Some("1.2.3.4"));
+    }
+
+    #[test]
+    fn test_forwarded_is_trimmed() {
+        let req = request_with_xff(Some("  1.2.3.4  ,5.6.7.8"));
+        assert_eq!(resolve_client_ip(&req).as_deref(), Some("1.2.3.4"));
+    }
+
+    #[test]
+    fn test_ipv4_mapped_prefix_stripped() {
+        let req = request_with_xff(Some("::ffff:1.2.3.4"));
+        assert_eq!(resolve_client_ip(&req).as_deref(), Some("1.2.3.4"));
+    }
+
+    #[test]
+    fn test_empty_forwarded_falls_through() {
+        // 空串是假值，不应被当成有效 IP
+        let req = request_with_xff(Some(""));
+        assert_eq!(resolve_client_ip(&req), None);
+    }
+
+    #[test]
+    fn test_no_header_no_connect_info() {
+        // 测试里没有 ConnectInfo（只有 start_server 才带），应为 None
+        let req = request_with_xff(None);
+        assert_eq!(resolve_client_ip(&req), None);
+    }
 }

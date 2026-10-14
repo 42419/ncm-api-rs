@@ -40,6 +40,20 @@ fn header_value(s: &str) -> HeaderValue {
     })
 }
 
+/// 上游 `util/request.js` 里反作弊 token 的落点分两种：
+///
+/// - `weapi` / `xeapi`：`headers['X-antiCheatToken'] = token`，是**独立 HTTP 头**；
+/// - `eapi` / `api`：`header['X-antiCheatToken'] = token`，进 eapi header cookie 对象，
+///   最终拼进 `Cookie` 头（那个分支另行处理，不走这里）。
+///
+/// Node 侧 `token` 是 `'v2'` / `'v3'` 时动态拉取、否则用静态常量；Rust 侧统一简化为
+/// 静态 `CHECK_TOKEN`（与 `Query::check_token` 的文档说明一致）。
+fn insert_anti_cheat_token(headers: &mut HeaderMap, check_token: bool) {
+    if check_token {
+        headers.insert("X-antiCheatToken", HeaderValue::from_static(CHECK_TOKEN));
+    }
+}
+
 /// 加密类型
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum CryptoType {
@@ -314,6 +328,10 @@ impl ApiClient {
                 headers.insert(USER_AGENT, header_value(ua));
 
                 data["csrf_token"] = Value::String(csrf_token);
+
+                // 上游：user-agent 之后、加密之前写独立头
+                insert_anti_cheat_token(&mut headers, options.check_token);
+
                 encrypt_data = crypto::weapi(&data);
                 url = format!("{}/weapi/{}", ref_domain, &uri[5..]);
             }
@@ -399,6 +417,8 @@ impl ApiClient {
                 if let Some(music_u) = cookie_map.get("MUSIC_U") {
                     headers.insert("x-music-u", header_value(music_u));
                 }
+                // 上游：xeapi 同样是独立头（写在 Cookie 之前）
+                insert_anti_cheat_token(&mut headers, options.check_token);
 
                 let mut xeapi_cookie = cookie_map.clone();
                 xeapi_cookie.insert("os".to_string(), xeapi_os.to_string());
@@ -678,5 +698,36 @@ impl ApiClient {
                 .to_string();
             Err(NcmError::from_api(status, msg))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 上游 `util/request.js` 里 weapi / xeapi 分支写的是
+    /// `headers['X-antiCheatToken'] = token` —— 独立 HTTP 头。
+    /// 这个位置在 `check_token` 透传打通前是死代码，回归时务必锚住。
+    #[test]
+    fn test_anti_cheat_token_is_standalone_header_only_when_enabled() {
+        let mut headers = HeaderMap::new();
+
+        insert_anti_cheat_token(&mut headers, false);
+        assert!(
+            headers.get("X-antiCheatToken").is_none(),
+            "未开启 checkToken 时不应带独立头"
+        );
+
+        insert_anti_cheat_token(&mut headers, true);
+        assert_eq!(
+            headers.get("X-antiCheatToken").unwrap().to_str().unwrap(),
+            CHECK_TOKEN,
+            "应写入静态 CHECK_TOKEN"
+        );
+        // 独立头不能顺手污染 Cookie；往 Cookie 里塞是 eapi / api 分支的走法
+        assert!(
+            headers.get(COOKIE).is_none(),
+            "weapi / xeapi 的 token 不应落到 Cookie 头"
+        );
     }
 }

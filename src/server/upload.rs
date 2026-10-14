@@ -2,7 +2,10 @@
 ///
 /// avatar_upload / voice_upload / cloud / playlist_cover_update 需要 multipart
 /// 表单处理，签名与普通 API 不同，单独实现
-use super::{build_error_response, build_success_response, AppState};
+use super::{
+    apply_client_ip, apply_transport_options, build_error_response, build_success_response,
+    AppState,
+};
 use crate::api::Query;
 use axum::extract::{Multipart, State};
 use axum::response::Response;
@@ -17,6 +20,7 @@ use axum::response::Response;
 /// - 其他文本字段作为 Query 参数
 pub async fn handle_avatar_upload(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     mut multipart: Multipart,
 ) -> Response {
     let mut query = Query::new();
@@ -49,6 +53,10 @@ pub async fn handle_avatar_upload(
             }
         }
     }
+
+    // 出站请求选项（util/option.js）与调用方 IP（server.js），与普通路由同一套规则
+    apply_transport_options(&mut query);
+    apply_client_ip(&mut query, &headers);
 
     let Some(data) = img_data else {
         return build_error_response(crate::error::NcmError::Unknown(
@@ -83,6 +91,7 @@ pub async fn handle_avatar_upload(
 /// - 其他文本字段作为 Query 参数
 pub async fn handle_voice_upload(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     mut multipart: Multipart,
 ) -> Response {
     let mut query = Query::new();
@@ -116,6 +125,10 @@ pub async fn handle_voice_upload(
             }
         }
     }
+
+    // 出站请求选项（util/option.js）与调用方 IP（server.js），与普通路由同一套规则
+    apply_transport_options(&mut query);
+    apply_client_ip(&mut query, &headers);
 
     let Some(data) = file_data else {
         return build_error_response(crate::error::NcmError::Unknown(
@@ -156,6 +169,7 @@ pub async fn handle_voice_upload(
 /// 把中文文件名弄坏，因此这里不做该转换（两边最终结果都是正确的 UTF-8）。
 pub async fn handle_cloud_upload(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     mut multipart: Multipart,
 ) -> Response {
     let mut query = Query::new();
@@ -189,6 +203,10 @@ pub async fn handle_cloud_upload(
             }
         }
     }
+
+    // 出站请求选项（util/option.js）与调用方 IP（server.js），与普通路由同一套规则
+    apply_transport_options(&mut query);
+    apply_client_ip(&mut query, &headers);
 
     let Some(data) = file_data else {
         return build_error_response(crate::error::NcmError::Unknown(
@@ -225,6 +243,7 @@ pub async fn handle_cloud_upload(
 /// - 其他文本字段作为 Query 参数
 pub async fn handle_playlist_cover_update(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     mut multipart: Multipart,
 ) -> Response {
     let mut query = Query::new();
@@ -262,6 +281,10 @@ pub async fn handle_playlist_cover_update(
             }
         }
     }
+
+    // 出站请求选项（util/option.js）与调用方 IP（server.js），与普通路由同一套规则
+    apply_transport_options(&mut query);
+    apply_client_ip(&mut query, &headers);
 
     let start = std::time::Instant::now();
     match state
