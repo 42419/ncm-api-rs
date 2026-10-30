@@ -8,6 +8,7 @@ use crate::util::cookie::{cookie_obj_to_string, cookie_to_json};
 use crate::util::device::{generate_device_id, generate_wnmcid, random_hex};
 use crate::util::ip::generate_random_chinese_ip;
 
+use rand::Rng;
 use reqwest::header::{HeaderMap, HeaderValue, COOKIE, REFERER, USER_AGENT};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -383,13 +384,13 @@ impl ApiClient {
                 let appver = cookie_map
                     .get("appver")
                     .filter(|_| cookie_map.get("os").map(String::as_str) == Some("android"))
-                    .map(String::as_str)
-                    .unwrap_or("9.1.65");
+                    .cloned()
+                    .unwrap_or_else(|| "9.1.65".to_string());
                 let osver = cookie_map
                     .get("osver")
                     .filter(|_| cookie_map.get("os").map(String::as_str) == Some("android"))
-                    .map(String::as_str)
-                    .unwrap_or("16");
+                    .cloned()
+                    .unwrap_or_else(|| "16".to_string());
                 let device_id = cookie_map.get("deviceId").cloned().unwrap_or_default();
                 let s_device_id = cookie_map
                     .get("sDeviceId")
@@ -413,8 +414,8 @@ impl ApiClient {
                 headers.insert("x-aeapi", HeaderValue::from_static("true"));
                 headers.insert("x-deviceid", header_value(&device_id));
                 headers.insert("x-os", HeaderValue::from_static(os));
-                headers.insert("x-osver", header_value(osver));
-                headers.insert("x-appver", header_value(appver));
+                headers.insert("x-osver", header_value(&osver));
+                headers.insert("x-appver", header_value(&appver));
                 headers.insert("x-sdeviceid", header_value(&s_device_id));
                 headers.insert("x-buildver", header_value(&buildver));
                 if let Some(music_u) = cookie_map.get("MUSIC_U") {

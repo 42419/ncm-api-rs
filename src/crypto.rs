@@ -207,7 +207,7 @@ pub fn eapi_req_decrypt(encrypted_hex: &str) -> Option<(String, serde_json::Valu
 
 /// 生成 XEAPI 公钥请求和响应签名。
 pub(crate) fn xeapi_sign(timestamp: &str, nonce: &str) -> Result<String, String> {
-    let mut mac = Hmac::<Sha256>::new_from_slice(XEAPI_SIGN_KEY.as_bytes())
+    let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(XEAPI_SIGN_KEY.as_bytes())
         .map_err(|error| error.to_string())?;
     mac.update(timestamp.as_bytes());
     mac.update(nonce.as_bytes());
@@ -229,7 +229,7 @@ fn xeapi_derive_aes_key(
     ephemeral_public_key: &[u8],
 ) -> Result<[u8; 16], String> {
     let mut extract =
-        Hmac::<Sha256>::new_from_slice(&[0; 32]).map_err(|error| error.to_string())?;
+        <Hmac<Sha256> as Mac>::new_from_slice(&[0; 32]).map_err(|error| error.to_string())?;
     extract.update(if shared_secret.is_empty() {
         &[0; 32]
     } else {
@@ -237,7 +237,8 @@ fn xeapi_derive_aes_key(
     });
     let prk = extract.finalize().into_bytes();
 
-    let mut expand = Hmac::<Sha256>::new_from_slice(&prk).map_err(|error| error.to_string())?;
+    let mut expand =
+        <Hmac<Sha256> as Mac>::new_from_slice(&prk).map_err(|error| error.to_string())?;
     expand.update(ephemeral_public_key);
     expand.update(&[1]);
     let output = expand.finalize().into_bytes();
