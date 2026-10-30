@@ -60,11 +60,19 @@ pub const OS_IPHONE: OsConfig = OsConfig {
     channel: "distribution",
 };
 
+pub const OS_OSX: OsConfig = OsConfig {
+    os: "osx",
+    appver: "3.1.10.5100",
+    osver: "15.5",
+    channel: "netease",
+};
+
 pub fn get_os_config(os_name: &str) -> &'static OsConfig {
     match os_name {
         "linux" => &OS_LINUX,
         "android" => &OS_ANDROID,
         "iphone" => &OS_IPHONE,
+        "osx" => &OS_OSX,
         _ => &OS_PC,
     }
 }
@@ -76,6 +84,7 @@ pub fn choose_user_agent(crypto: &str, ua_type: &str) -> &'static str {
         ("linuxapi", _) => "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.90 Safari/537.36",
         ("api" | "eapi", "android") => "NeteaseMusic/9.1.65.240927161425(9001065);Dalvik/2.1.0 (Linux; U; Android 14; 23013RK75C Build/UKQ1.230804.001)",
         ("api" | "eapi", "iphone") => "NeteaseMusic 9.0.90/5038 (iPhone; iOS 16.2; zh_CN)",
+        ("api" | "eapi", "osx") => "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         ("api" | "eapi", _) => "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Safari/537.36 Chrome/91.0.4472.164 NeteaseMusicDesktop/3.0.18.203152",
         _ => "",
     }

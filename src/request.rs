@@ -113,7 +113,7 @@ pub struct ApiClient {
 }
 
 impl ApiClient {
-    async fn get_xeapi_public_key(&self) -> Result<crypto::XeapiPublicKey> {
+    async fn get_xeapi_public_key(&self, device_id: &str) -> Result<crypto::XeapiPublicKey> {
         let mut cached = XEAPI_KEY.lock().await;
         if let Some(key) = cached.as_ref() {
             return Ok(key.clone());
@@ -126,7 +126,6 @@ impl ApiClient {
             nonce.push(char::from(b'0' + rng.gen_range(0..10)));
         }
         let signature = crypto::xeapi_sign(&timestamp, &nonce).map_err(NcmError::Crypto)?;
-        let device_id = self.get_device_id();
         let params = [
             ("appVersion", "9.1.65".to_string()),
             ("currentKeyVersion", String::new()),
@@ -379,7 +378,11 @@ impl ApiClient {
                 url = format!("{}/api/linux/forward", ref_domain);
             }
             CryptoType::Xeapi => {
-                let public_key = self.get_xeapi_public_key().await?;
+                let public_key = self
+                    .get_xeapi_public_key(
+                        cookie_map.get("deviceId").map(String::as_str).unwrap_or(""),
+                    )
+                    .await?;
                 let os = "android";
                 let appver = cookie_map
                     .get("appver")
@@ -520,10 +523,16 @@ impl ApiClient {
 
                 headers.insert(COOKIE, header_value(&header_cookie_str));
 
-                let ua = options
-                    .ua
-                    .as_deref()
-                    .unwrap_or_else(|| choose_user_agent("api", "iphone"));
+                let ua = options.ua.as_deref().unwrap_or_else(|| {
+                    choose_user_agent(
+                        "api",
+                        if cookie_map.get("os").map(String::as_str) == Some("osx") {
+                            "osx"
+                        } else {
+                            "iphone"
+                        },
+                    )
+                });
                 headers.insert(USER_AGENT, header_value(ua));
 
                 let api_domain = if domain.is_empty() {

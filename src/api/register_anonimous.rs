@@ -33,12 +33,10 @@ impl ApiClient {
         let data = json!({
             "username": encoded_id
         });
+        let mut options = query.to_option(CryptoType::Xeapi);
+        options.cookie = Some(format!("deviceId={device_id}; os=android"));
         let result = self
-            .request(
-                "/api/register/anonimous",
-                data,
-                query.to_option(CryptoType::Weapi),
-            )
+            .request("/api/register/anonimous", data, options)
             .await?;
         Ok(result)
     }
