@@ -12,11 +12,7 @@ impl ApiClient {
             "targetId": query.get_or("targetId", ""),
             "targetType": query.get_or("targetType", ""),
         });
-        self.request(
-            "/api/chart/detail",
-            data,
-            query.to_option(CryptoType::Eapi),
-        )
-        .await
+        self.request("/api/chart/detail", data, query.to_option(CryptoType::Eapi))
+            .await
     }
 }

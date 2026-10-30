@@ -130,8 +130,8 @@ mod comment_like;
 mod comment_music;
 mod comment_mv;
 mod comment_new;
-mod comment_reply;
 mod comment_playlist;
+mod comment_reply;
 mod comment_report;
 mod comment_video;
 
@@ -405,21 +405,21 @@ mod fanscenter_overview_get;
 mod fanscenter_trend_list;
 
 // ---- 声音相关 ----
-mod voice_delete;
-mod voice_detail;
-mod voice_lyric;
-mod voicelist_detail;
-mod voicelist_my_created;
-mod voicelist_list;
-mod voicelist_list_search;
-mod voicelist_search;
-mod voicelist_trans;
 mod sati_resource_list;
 mod sati_resource_list_more;
 mod sati_resource_sub;
 mod sati_resource_sub_list;
 mod sati_tag_list;
 mod sati_timescene_resources_get;
+mod voice_delete;
+mod voice_detail;
+mod voice_lyric;
+mod voicelist_detail;
+mod voicelist_list;
+mod voicelist_list_search;
+mod voicelist_my_created;
+mod voicelist_search;
+mod voicelist_trans;
 
 // ---- 私人 DJ ----
 mod aidj_content_rcmd;
@@ -471,7 +471,7 @@ mod cloud_upload_complete;
 mod cloud_upload_token;
 
 // ---- EAPI 工具 ----
-mod eapi_decrypt;
+mod decrypt;
 
 // ---- 其他 ----
 #[allow(clippy::module_inception)]

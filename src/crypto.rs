@@ -5,21 +5,44 @@
 /// - eapi: MD5 签名 + AES-128-ECB
 /// - linuxapi: AES-128-ECB
 use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, BlockEncryptMut, KeyInit, KeyIvInit};
+use aes_gcm::aead::{AeadInPlace, KeyInit as AeadKeyInit};
+use aes_gcm::{Aes128Gcm, Nonce};
+use base64::{engine::general_purpose::STANDARD, Engine};
+use flate2::read::GzDecoder;
+use hmac::{Hmac, Mac};
 use md5::{Digest, Md5};
 use rand::Rng;
 use rsa::traits::PublicKeyParts;
 use rsa::{BigUint, RsaPublicKey};
+use serde::Deserialize;
+use sha2::Sha256;
 use std::collections::HashMap;
+use std::io::Read;
+use x25519_dalek::{EphemeralSecret, PublicKey};
 
 type Aes128CbcEnc = cbc::Encryptor<aes::Aes128>;
 type Aes128EcbEnc = ecb::Encryptor<aes::Aes128>;
 type Aes128EcbDec = ecb::Decryptor<aes::Aes128>;
+type Aes256EcbEnc = ecb::Encryptor<aes::Aes256>;
+type Aes256EcbDec = ecb::Decryptor<aes::Aes256>;
 
 const IV: &[u8] = b"0102030405060708";
 const PRESET_KEY: &[u8] = b"0CoJUm6Qyw8W8jud";
 const LINUXAPI_KEY: &[u8] = b"rFgB&h#%2?^eDg:Q";
 const EAPI_KEY: &[u8] = b"e82ckenh8dichen8";
 const BASE62: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+const XEAPI_STATIC_KEY_HEX: &str =
+    "ab1d5a430f6bb04a3f01e81ddd72bd916d5ce591248ac128714806d7f8fb1b84";
+const XEAPI_SIGN_KEY: &str =
+    "mUHCwVNWJbunMqAHf5MImuirT6plvs6VSFW62MGHstFQxhBGdEoIhLItH3djc4+FB/OKty3+lL2rGeoFBpVe5g==";
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct XeapiPublicKey {
+    #[serde(rename = "publicKey")]
+    pub public_key: String,
+    pub version: String,
+    pub sk: String,
+}
 
 // RSA 公钥 Base64 编码的 DER 数据（PKCS#8 / SubjectPublicKeyInfo 格式）
 const PUBLIC_KEY_DER_B64: &str = "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDgtQn2JZ34ZC28NWYpAUd98iZ37BUrX/aKzmFbt7clFSs6sXqHauqKWqdtLkF2KexO40H1YTX8z2lSgBBOAxLsvaklV8k4cBFK9snQXE9/DDaFt6Rr7iVZMldczhC0JNgTz+SHXT6CBHuX3e9SdB1Ua44oncaTWz7OBGLbCiK45wIDAQAB";
@@ -45,6 +68,34 @@ fn aes_ecb_decrypt_hex(ciphertext_hex: &str, key: &[u8]) -> Result<Vec<u8>, Stri
     cipher
         .decrypt_padded_vec_mut::<Pkcs7>(&ciphertext)
         .map_err(|e| e.to_string())
+}
+
+fn aes128_ecb_encrypt(plaintext: &[u8], key: &[u8]) -> Vec<u8> {
+    let cipher = Aes128EcbEnc::new(key.into());
+    cipher.encrypt_padded_vec_mut::<Pkcs7>(plaintext)
+}
+
+fn aes128_ecb_decrypt(ciphertext: &[u8], key: &[u8]) -> Result<Vec<u8>, String> {
+    let cipher = Aes128EcbDec::new(key.into());
+    cipher
+        .decrypt_padded_vec_mut::<Pkcs7>(ciphertext)
+        .map_err(|error| error.to_string())
+}
+
+fn aes256_ecb_encrypt(plaintext: &[u8], key: &[u8]) -> Vec<u8> {
+    let cipher = Aes256EcbEnc::new(key.into());
+    cipher.encrypt_padded_vec_mut::<Pkcs7>(plaintext)
+}
+
+fn aes256_ecb_decrypt(ciphertext: &[u8], key: &[u8]) -> Result<Vec<u8>, String> {
+    let cipher = Aes256EcbDec::new(key.into());
+    cipher
+        .decrypt_padded_vec_mut::<Pkcs7>(ciphertext)
+        .map_err(|error| error.to_string())
+}
+
+fn xeapi_static_key() -> Result<Vec<u8>, String> {
+    hex::decode(XEAPI_STATIC_KEY_HEX).map_err(|error| error.to_string())
 }
 
 /// RSA 加密（NONE / raw / textbook RSA，无 padding）
@@ -152,6 +203,205 @@ pub fn eapi_req_decrypt(encrypted_hex: &str) -> Option<(String, serde_json::Valu
     } else {
         None
     }
+}
+
+/// 生成 XEAPI 公钥请求和响应签名。
+pub(crate) fn xeapi_sign(timestamp: &str, nonce: &str) -> Result<String, String> {
+    let mut mac = Hmac::<Sha256>::new_from_slice(XEAPI_SIGN_KEY.as_bytes())
+        .map_err(|error| error.to_string())?;
+    mac.update(timestamp.as_bytes());
+    mac.update(nonce.as_bytes());
+    Ok(STANDARD.encode(mac.finalize().into_bytes()))
+}
+
+/// 解密 XEAPI 服务端下发的动态公钥。
+pub(crate) fn xeapi_decrypt_public_key(encrypted_data: &str) -> Result<XeapiPublicKey, String> {
+    let key = xeapi_static_key()?;
+    let encrypted = STANDARD
+        .decode(encrypted_data)
+        .map_err(|error| error.to_string())?;
+    let plaintext = aes256_ecb_decrypt(&encrypted, &key)?;
+    serde_json::from_slice(&plaintext).map_err(|error| error.to_string())
+}
+
+fn xeapi_derive_aes_key(
+    shared_secret: &[u8],
+    ephemeral_public_key: &[u8],
+) -> Result<[u8; 16], String> {
+    let mut extract =
+        Hmac::<Sha256>::new_from_slice(&[0; 32]).map_err(|error| error.to_string())?;
+    extract.update(if shared_secret.is_empty() {
+        &[0; 32]
+    } else {
+        shared_secret
+    });
+    let prk = extract.finalize().into_bytes();
+
+    let mut expand = Hmac::<Sha256>::new_from_slice(&prk).map_err(|error| error.to_string())?;
+    expand.update(ephemeral_public_key);
+    expand.update(&[1]);
+    let output = expand.finalize().into_bytes();
+    let mut key = [0; 16];
+    key.copy_from_slice(&output[..16]);
+    Ok(key)
+}
+
+fn xeapi_encrypt_session_key(
+    dynamic_key: &[u8],
+    public_key_state: &XeapiPublicKey,
+    os: &str,
+) -> Result<Vec<u8>, String> {
+    let peer_raw = STANDARD
+        .decode(&public_key_state.public_key)
+        .map_err(|error| error.to_string())?;
+    let peer_bytes: [u8; 32] = peer_raw
+        .try_into()
+        .map_err(|_| "XEAPI public key must be 32 bytes".to_string())?;
+    let peer = PublicKey::from(peer_bytes);
+    let secret = EphemeralSecret::random_from_rng(rand::thread_rng());
+    let ephemeral = PublicKey::from(&secret);
+    let shared_secret = secret.diffie_hellman(&peer);
+    let aes_key = xeapi_derive_aes_key(shared_secret.as_bytes(), ephemeral.as_bytes())?;
+
+    let mut iv = [0; 12];
+    rand::thread_rng().fill(&mut iv);
+    let cipher = Aes128Gcm::new_from_slice(&aes_key).map_err(|error| error.to_string())?;
+    let mut plaintext = format!(
+        "{}|{}|{}",
+        STANDARD.encode(dynamic_key),
+        os,
+        public_key_state.sk
+    )
+    .into_bytes();
+    let tag = cipher
+        .encrypt_in_place_detached(Nonce::from_slice(&iv), b"", &mut plaintext)
+        .map_err(|error| error.to_string())?;
+
+    let mut result = Vec::with_capacity(32 + iv.len() + plaintext.len() + tag.len());
+    result.extend_from_slice(ephemeral.as_bytes());
+    result.extend_from_slice(&iv);
+    result.extend_from_slice(&plaintext);
+    result.extend_from_slice(&tag);
+    Ok(result)
+}
+
+fn xeapi_mid_transform(ciphertext: &[u8]) -> Vec<u8> {
+    let mut random = [0; 16];
+    rand::thread_rng().fill(&mut random);
+    let xored: Vec<u8> = ciphertext
+        .iter()
+        .enumerate()
+        .map(|(index, byte)| byte ^ random[index & 0x0f])
+        .collect();
+    let encoded = STANDARD.encode(xored).into_bytes();
+    let rotation = if encoded.is_empty() {
+        0
+    } else {
+        (random[0] as usize & 0x0f) % encoded.len()
+    };
+
+    let mut result = Vec::with_capacity(random.len() + encoded.len());
+    result.extend_from_slice(&random);
+    result.extend_from_slice(&encoded[rotation..]);
+    result.extend_from_slice(&encoded[..rotation]);
+    result
+}
+
+fn xeapi_plaintext(uri: &str, data: &serde_json::Value) -> Result<Vec<u8>, String> {
+    let mut fields = serde_json::Map::new();
+    let (path, query) = uri.split_once('?').unwrap_or((uri, ""));
+    if path.is_empty() {
+        return Err("XEAPI URI must not be empty".to_string());
+    }
+
+    if let Some(object) = data.as_object() {
+        let pairs = object
+            .iter()
+            .filter(|(key, _)| key.as_str() != "e_r")
+            .map(|(key, value)| {
+                (
+                    key.as_str(),
+                    value
+                        .as_str()
+                        .map(str::to_string)
+                        .unwrap_or_else(|| value.to_string()),
+                )
+            })
+            .collect::<Vec<_>>();
+        let body = serde_urlencoded::to_string(pairs).map_err(|error| error.to_string())?;
+        fields.insert(
+            "body".to_string(),
+            serde_json::Value::String(STANDARD.encode(body)),
+        );
+    }
+
+    let query_string = if query.is_empty() {
+        "e_r=true".to_string()
+    } else {
+        format!("{}&e_r=true", query)
+    };
+    fields.insert(
+        "queryString".to_string(),
+        serde_json::Value::String(query_string),
+    );
+    serde_json::to_vec(&serde_json::Value::Object(fields)).map_err(|error| error.to_string())
+}
+
+/// 构造 XEAPI 表单字段。
+pub(crate) fn xeapi(
+    uri: &str,
+    data: &serde_json::Value,
+    public_key_state: &XeapiPublicKey,
+    session_id: &str,
+    session_key: Option<&[u8]>,
+    os: &str,
+) -> Result<HashMap<String, String>, String> {
+    let dynamic_key = session_key
+        .filter(|key| !key.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| {
+            let mut key = [0; 16];
+            rand::thread_rng().fill(&mut key);
+            key.to_vec()
+        });
+    let static_key = xeapi_static_key()?;
+    let plaintext = xeapi_plaintext(uri, data)?;
+    let first = aes256_ecb_encrypt(&plaintext, &static_key);
+    let transformed = xeapi_mid_transform(&first);
+    let encrypted_body = aes128_ecb_encrypt(&transformed, &dynamic_key);
+    let encrypted_session = xeapi_encrypt_session_key(&dynamic_key, public_key_state, os)?;
+    let session_marker = format!(
+        "{}|{}",
+        public_key_state.version,
+        if session_key.is_some() {
+            session_id
+        } else {
+            ""
+        }
+    );
+    let encrypted_marker = aes256_ecb_encrypt(session_marker.as_bytes(), &static_key);
+
+    let mut result = HashMap::new();
+    result.insert("B".to_string(), STANDARD.encode(encrypted_body));
+    result.insert("S".to_string(), STANDARD.encode(encrypted_session));
+    result.insert("R".to_string(), STANDARD.encode(encrypted_marker));
+    Ok(result)
+}
+
+/// 解密 XEAPI 响应体。
+pub(crate) fn xeapi_res_decrypt(body: &[u8]) -> Result<serde_json::Value, String> {
+    let plaintext = aes128_ecb_decrypt(body, EAPI_KEY)?;
+    let decoded = if plaintext.starts_with(&[0x1f, 0x8b]) {
+        let mut decoder = GzDecoder::new(plaintext.as_slice());
+        let mut output = Vec::new();
+        decoder
+            .read_to_end(&mut output)
+            .map_err(|error| error.to_string())?;
+        output
+    } else {
+        plaintext
+    };
+    serde_json::from_slice(&decoded).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

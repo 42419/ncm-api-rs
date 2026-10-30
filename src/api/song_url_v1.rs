@@ -22,7 +22,7 @@ impl ApiClient {
         self.request(
             "/api/song/enhance/player/url/v1",
             data,
-            query.to_option(CryptoType::default()),
+            query.to_option(CryptoType::Xeapi),
         )
         .await
     }

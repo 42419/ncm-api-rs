@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::LazyLock;
+use tokio::sync::Mutex;
 
 /// 特殊状态码集合（视为 200）
 static SPECIAL_STATUS_CODES: LazyLock<std::collections::HashSet<i64>> =
@@ -25,6 +26,10 @@ static WNMCID: LazyLock<String> = LazyLock::new(generate_wnmcid);
 /// Cookie Domain 移除正则（编译一次，全局复用）
 static DOMAIN_REGEX: LazyLock<regex_lite::Regex> =
     LazyLock::new(|| regex_lite::Regex::new(r"\s*Domain=[^;]+;?").unwrap());
+static XEAPI_KEY: LazyLock<Mutex<Option<crypto::XeapiPublicKey>>> =
+    LazyLock::new(|| Mutex::new(None));
+static XEAPI_SESSION: LazyLock<Mutex<(String, Vec<u8>)>> =
+    LazyLock::new(|| Mutex::new((String::new(), Vec::new())));
 
 /// 安全创建 HeaderValue，无效字符会被过滤
 fn header_value(s: &str) -> HeaderValue {
@@ -45,6 +50,7 @@ pub enum CryptoType {
     #[default]
     Eapi,
     Linuxapi,
+    Xeapi,
     Api, // 明文
 }
 
@@ -54,6 +60,7 @@ impl CryptoType {
             CryptoType::Weapi => "weapi",
             CryptoType::Eapi => "eapi",
             CryptoType::Linuxapi => "linuxapi",
+            CryptoType::Xeapi => "xeapi",
             CryptoType::Api => "api",
         }
     }
@@ -64,6 +71,7 @@ impl From<&str> for CryptoType {
         match s {
             "weapi" => CryptoType::Weapi,
             "linuxapi" => CryptoType::Linuxapi,
+            "xeapi" => CryptoType::Xeapi,
             "api" => CryptoType::Api,
             _ => CryptoType::Eapi,
         }
@@ -104,6 +112,84 @@ pub struct ApiClient {
 }
 
 impl ApiClient {
+    async fn get_xeapi_public_key(&self) -> Result<crypto::XeapiPublicKey> {
+        let mut cached = XEAPI_KEY.lock().await;
+        if let Some(key) = cached.as_ref() {
+            return Ok(key.clone());
+        }
+
+        let timestamp = chrono::Utc::now().timestamp_millis().to_string();
+        let mut nonce = String::with_capacity(16);
+        let mut rng = rand::thread_rng();
+        for _ in 0..16 {
+            nonce.push(char::from(b'0' + rng.gen_range(0..10)));
+        }
+        let signature = crypto::xeapi_sign(&timestamp, &nonce).map_err(NcmError::Crypto)?;
+        let device_id = self.get_device_id();
+        let params = [
+            ("appVersion", "9.1.65".to_string()),
+            ("currentKeyVersion", String::new()),
+            ("deviceId", device_id.to_string()),
+            ("nonce", nonce.clone()),
+            ("os", "android".to_string()),
+            ("requestType", "active".to_string()),
+            ("signature", signature),
+            ("t1", String::new()),
+            ("t2", String::new()),
+            ("timestamp", timestamp.clone()),
+            ("uid", String::new()),
+        ];
+        let response = self
+            .client
+            .post(format!(
+                "{}/api/gorilla/anti/crawler/security/key/get",
+                API_DOMAIN
+            ))
+            .header(USER_AGENT, choose_user_agent("api", "android"))
+            .header(
+                COOKIE,
+                format!("deviceId={}", urlencoding::encode(device_id)),
+            )
+            .form(&params)
+            .send()
+            .await?;
+        let value: Value = response.json().await?;
+        if value.get("code").and_then(Value::as_i64) != Some(200) {
+            return Err(NcmError::Crypto(
+                "XEAPI public key request failed".to_string(),
+            ));
+        }
+        let data = value
+            .get("data")
+            .ok_or_else(|| NcmError::Crypto("XEAPI public key response missing data".into()))?;
+        let encrypted = data
+            .get("encryptedData")
+            .and_then(Value::as_str)
+            .ok_or_else(|| NcmError::Crypto("XEAPI encrypted key missing".into()))?;
+        let returned_signature = data
+            .get("signature")
+            .and_then(Value::as_str)
+            .ok_or_else(|| NcmError::Crypto("XEAPI key signature missing".into()))?;
+        let returned_timestamp = data
+            .get("timestamp")
+            .map(|value| {
+                value
+                    .as_str()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| value.to_string())
+            })
+            .ok_or_else(|| NcmError::Crypto("XEAPI key timestamp missing".into()))?;
+        let expected = crypto::xeapi_sign(&returned_timestamp, &nonce).map_err(NcmError::Crypto)?;
+        if returned_signature != expected {
+            return Err(NcmError::Crypto(
+                "XEAPI public key signature mismatch".to_string(),
+            ));
+        }
+        let key = crypto::xeapi_decrypt_public_key(encrypted).map_err(NcmError::Crypto)?;
+        *cached = Some(key.clone());
+        Ok(key)
+    }
+
     /// 创建新的 API 客户端
     pub fn new(cookie: Option<String>) -> Self {
         let client = reqwest::Client::builder()
@@ -291,6 +377,71 @@ impl ApiClient {
                 encrypt_data = crypto::linuxapi(&linux_data);
                 url = format!("{}/api/linux/forward", ref_domain);
             }
+            CryptoType::Xeapi => {
+                let public_key = self.get_xeapi_public_key().await?;
+                let os = "android";
+                let appver = cookie_map
+                    .get("appver")
+                    .filter(|_| cookie_map.get("os").map(String::as_str) == Some("android"))
+                    .map(String::as_str)
+                    .unwrap_or("9.1.65");
+                let osver = cookie_map
+                    .get("osver")
+                    .filter(|_| cookie_map.get("os").map(String::as_str) == Some("android"))
+                    .map(String::as_str)
+                    .unwrap_or("16");
+                let device_id = cookie_map.get("deviceId").cloned().unwrap_or_default();
+                let s_device_id = cookie_map
+                    .get("sDeviceId")
+                    .cloned()
+                    .unwrap_or_else(|| device_id.clone());
+                let buildver = cookie_map
+                    .get("buildver")
+                    .cloned()
+                    .unwrap_or_else(|| chrono::Utc::now().timestamp().to_string());
+                cookie_map.insert("os".to_string(), os.to_string());
+                cookie_map.insert("appver".to_string(), appver.to_string());
+                cookie_map.insert("osver".to_string(), osver.to_string());
+                cookie_map.insert("sDeviceId".to_string(), s_device_id.clone());
+                cookie_map.insert("buildver".to_string(), buildver.clone());
+                headers.insert(COOKIE, header_value(&cookie_obj_to_string(&cookie_map)));
+                headers.insert(
+                    USER_AGENT,
+                    header_value(choose_user_agent("api", "android")),
+                );
+                headers.insert("X-Client-Enc-State", HeaderValue::from_static("ENCRYPTED"));
+                headers.insert("x-aeapi", HeaderValue::from_static("true"));
+                headers.insert("x-deviceid", header_value(&device_id));
+                headers.insert("x-os", HeaderValue::from_static(os));
+                headers.insert("x-osver", header_value(osver));
+                headers.insert("x-appver", header_value(appver));
+                headers.insert("x-sdeviceid", header_value(&s_device_id));
+                headers.insert("x-buildver", header_value(&buildver));
+                if let Some(music_u) = cookie_map.get("MUSIC_U") {
+                    headers.insert("x-music-u", header_value(music_u));
+                }
+
+                let (session_id, session_key) = XEAPI_SESSION.lock().await.clone();
+                encrypt_data = crypto::xeapi(
+                    uri,
+                    &data,
+                    &public_key,
+                    &session_id,
+                    if session_key.is_empty() {
+                        None
+                    } else {
+                        Some(&session_key)
+                    },
+                    os,
+                )
+                .map_err(NcmError::Crypto)?;
+                let api_domain = if domain.is_empty() {
+                    "https://interface3.music.163.com"
+                } else {
+                    domain
+                };
+                url = format!("{}/xeapi/{}", api_domain, &uri[5..]);
+            }
             CryptoType::Eapi | CryptoType::Api => {
                 // 构造 eapi header cookie
                 let now_secs = chrono::Utc::now().timestamp().to_string();
@@ -419,7 +570,11 @@ impl ApiClient {
         // 设置 Content-Type
         headers.insert(
             reqwest::header::CONTENT_TYPE,
-            HeaderValue::from_static("application/x-www-form-urlencoded"),
+            HeaderValue::from_static(if crypto_type == CryptoType::Xeapi {
+                "application/x-www-form-urlencoded;charset=utf-8"
+            } else {
+                "application/x-www-form-urlencoded"
+            }),
         );
 
         // 构造请求并发送（按需使用代理）
@@ -446,6 +601,22 @@ impl ApiClient {
         };
 
         // 处理响应 cookie
+        let xeapi_session = if crypto_type == CryptoType::Xeapi {
+            Some((
+                response
+                    .headers()
+                    .get("x-encr-ssid")
+                    .and_then(|v| v.to_str().ok())
+                    .map(str::to_string),
+                response
+                    .headers()
+                    .get("x-encr-sskey")
+                    .and_then(|v| v.to_str().ok())
+                    .map(str::to_string),
+            ))
+        } else {
+            None
+        };
         let resp_cookies: Vec<String> = response
             .headers()
             .get_all("set-cookie")
@@ -461,7 +632,13 @@ impl ApiClient {
         let e_r = options.e_r.unwrap_or(false);
         let status_code = response.status().as_u16() as i64;
 
-        let body: Value = if crypto_type == CryptoType::Eapi && e_r {
+        let body: Value = if crypto_type == CryptoType::Xeapi {
+            let bytes = response.bytes().await?;
+            if let Some((Some(id), Some(key))) = xeapi_session {
+                *XEAPI_SESSION.lock().await = (id.to_string(), key.as_bytes().to_vec());
+            }
+            crypto::xeapi_res_decrypt(&bytes).unwrap_or(Value::Null)
+        } else if crypto_type == CryptoType::Eapi && e_r {
             let bytes = response.bytes().await?;
             let hex_str = hex::encode_upper(&bytes);
             crypto::eapi_res_decrypt(&hex_str).unwrap_or(Value::Null)
