@@ -13,6 +13,7 @@ mod lyric;
 mod lyric_new;
 mod scrobble;
 mod song_chorus;
+mod song_cloud_download;
 mod song_copyright_rcmd;
 mod song_creators;
 mod song_detail;
@@ -148,6 +149,7 @@ mod program_recommend;
 mod recommend_resource;
 mod recommend_songs;
 mod recommend_songs_dislike;
+mod relay_play_state_submit;
 
 // ---- 登录相关 ----
 mod activate_init_profile;
@@ -445,8 +447,11 @@ mod vip_growthpoint_get;
 mod vip_info;
 mod vip_info_v2;
 mod vip_sign;
+mod vip_sign_detail;
+mod vip_sign_history;
 mod vip_sign_info;
 mod vip_tasks;
+mod vip_tasks_v1;
 mod vip_timemachine;
 
 // ---- 云贝相关 ----
